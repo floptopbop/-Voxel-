@@ -7,6 +7,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/math/ConvexHull.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/ConvexGeometry.js"></script>
 <!--
   ═══════════════════════════════════════════════════════════════
   PANDRA_OS // ODM — voxel monument builder + ODM flight
@@ -16,241 +18,391 @@
   [ODM]    dual-stick grapple flight (Test_2 base) — replaces walk
   [TUNE]   every movement/camera var → live slider — generated
            from MOVE_SLIDERS/CAM_SLIDERS tables, tweak mid-flight
-  Known-fix defaults baked in: boostCone 0.6 (float), camLag 0.22,
+  Known-fix defaults baked in: boostCone 0.6 (float), no camera lag,
   smoke base<max ordering.
   ═══════════════════════════════════════════════════════════════
 -->
     <style>
-        :root {
-            --bg:       #1A1C1B;
-            --deck:     #062636;
-            --accent:   #41688E;
-            --hi:       #99CADE;
-            --text:     #5A6660;
-            --muted:    #EACCAF;
-            --ember:    #4F3A37;
-            --gold:     #8A7040;
-            --gold-hi:  #D4B86A;
-            --grab:     #80C0A0;
-            --glow:     rgba(153,202,222,0.12);
-            --glow2:    rgba(153,202,222,0.25);
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body, html {
-            background: var(--bg);
-            color: var(--text);
-            font-family: 'Share Tech Mono', monospace;
-            user-select: none; -webkit-user-select: none;
-            width: 100vw; height: 100vh;
-            overflow: hidden;
-            display: flex; flex-direction: column;
-        }
+/* ═══════════════════════════════════════════════════════════
+   PANDRA_OS // ODM  —  STYLES v2
+   sharper · more alive · actually readable
+═══════════════════════════════════════════════════════════ */
 
-        /* ── CANVAS ── */
-        #canvas-container {
-            flex: 1; position: relative; width: 100%; overflow: hidden;
-            cursor: grab; background: #1A1C1B;
-        }
-        #canvas-container:active { cursor: grabbing; }
+:root 	{
+    /* ── Core surface ── */
+    --bg:        #2D2C2E;
+    --deck:      #70736D;
+    --surface:   #374334;
 
-        /* ── DECK ── */
-        #ui-deck {
-            flex: 0 0 auto;
-            width: 100%; background: var(--deck);
-            border-top: 2px solid var(--accent);
-            display: flex; flex-direction: column;
-            box-shadow: 0 -8px 24px rgba(0,0,0,0.5);
-        }
-        /* in wander mode the deck dims but STAYS interactive so you can
-           tune movement mid-flight; tap the tab to expand/collapse */
-        body.in-walk #ui-deck { opacity: 0.35; }
-        body.in-walk #ui-deck.peek { opacity: 0.96; }
-        #ui-deck.collapsed .deck-body { display: none; }
+    /* ── Blues ── */
+    --accent:    #4A7DA8;
+    --accent2:   #5D9EC9;
+    --hi:        #B8DDEF;
 
-        #deck-tab {
-            height: 28px; min-height: 28px; flex-shrink: 0;
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 0 10px 0 14px;
-            font-size: 0.62rem; letter-spacing: 4px; text-transform: lowercase;
-            cursor: pointer; color: var(--text);
-            border-bottom: 1px solid rgba(153,202,222,0.04);
-        }
-        #deck-toggle { color: var(--accent); margin-right: 6px; transition: transform 0.4s; }
-        #ui-deck.collapsed #deck-toggle { transform: rotate(-90deg); }
+    /* ── Text tiers ── */
+    --text-pri:  #DOECFO;
+    --text-sec:  #DDE2E6;
+    --text-dim:  #9AA5A7;
 
-        .deck-body {
-            display: flex; flex-direction: row;
-            padding: 6px 10px; gap: 0;
-            overflow-y: auto; max-height: 42vh;
-            opacity: 0.92;
-        }
-        .col { display: flex; flex-direction: column; gap: 3px; padding-right: 12px; }
-        .col:not(:last-child) { border-right: 1px solid rgba(153,202,222,0.04); margin-right: 12px; }
-        .col-views { flex: 2.2; }
-        .col-tune  { flex: 1.6; }
-        .col-move  { flex: 1.6; }
-        .col-cam   { flex: 1.6; }
-        .col-tele  { flex: 1; min-width: 88px; }
-        .col-lbl {
-            font-size: 0.8rem; letter-spacing: 1px; color: var(--muted);
-            text-transform: lowercase; border-bottom: 1px dashed rgba(153,202,222,0.06);
-            padding-bottom: 2px; margin-bottom: 1px;
-        }
+    /* ── Warm / state accents ── */
+    --muted:     #E7A024;
+    --ember:     #993230;
+    --gold:      #9A8050;
+    --gold-hi:   #CEB8AD;
+    --grab:      #70D490;
+    --danger:    #C04040;
 
-        .view-pair { display: flex; gap: 4px; }
-        .view-slot {
-            flex: 1; display: flex; flex-direction: column; gap: 1px;
-            background: rgba(65,70,70,0.2); border: 1px dashed var(--muted);
-            padding: 3px 4px; border-radius: 3px; transition: all 0.4s;
-        }
-        .view-slot.loaded { border-color: var(--accent); background: rgba(65,104,142,0.06); }
-        #slot-top { opacity: 1; }
-        #slot-top.loaded { opacity: 0.85; }
-        .view-slot-lbl { font-size: 0.8rem; color: var(--muted); letter-spacing: 2px; }
+    /* ── Glows ── */
+    --glow:      rgba(180,220,240,0.18);
+    --glow2:     rgba(180,220,240,0.32);
+    --glow-grab: rgba(112,212,144,0.38);
+    --glow-gold: rgba(224,200,122,0.38);
+}
 
-        input[type="file"] { font-size: 0.36rem; color: var(--muted); background: none; border: none; width: 100%; cursor: pointer; }
-        input[type="file"]::file-selector-button {
-            background: rgba(65,104,142,0.08); border: 1px solid rgba(65,104,142,0.2);
-            color: var(--hi); font-family: inherit; font-size: 0.6rem;
-            padding: 2px 5px; cursor: pointer; border-radius: 3px; transition: all 0.3s;
-        }
-        input[type="file"]::file-selector-button:hover { background: var(--accent); color: var(--deck); }
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-        input[type="range"] {
-            width: 100%; accent-color: var(--accent); height: 2px;
-            background: #2A2E2C; cursor: pointer; -webkit-appearance: none; margin: 3px 0;
-            touch-action: manipulation;
-        }
-        input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none; width: 11px; height: 11px; border-radius: 50%;
-            background: var(--accent); cursor: pointer; border: 1px solid var(--bg);
-            box-shadow: 0 0 5px var(--glow);
-        }
-        .range-row { display: flex; flex-direction: column; gap: 1px; margin-bottom: 2px; }
-        .range-lbl {
-            font-size: 0.4rem; color: var(--muted); text-transform: lowercase;
-            display: flex; justify-content: space-between; letter-spacing: 1px;
-        }
-        .range-val { color: var(--hi); }
+body, html {
+    background: var(--bg);
+    color: var(--text-pri);
+    font-family: 'Share Tech Mono', monospace;
+    user-select: none; -webkit-user-select: none;
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+}
 
-        .stat-row {
-            font-size: 0.4rem; color: var(--muted); display: flex;
-            justify-content: space-between; padding: 1px 0;
-            border-bottom: 1px solid rgba(42,46,44,0.9); letter-spacing: 1px;
-        }
-        .stat-v { color: rgba(153,202,222,0.45); }
+/* ── CANVAS ── */
+#canvas-container {
+    flex: 1; position: relative; width: 100%; overflow: hidden;
+    cursor: grab; background: var(--bg);
+}
+#canvas-container:active { cursor: grabbing; }
 
-        .sym-note {
-            font-size: 0.44rem; color: var(--muted); padding: 3px 5px;
-            background: rgba(65,70,70,0.2); border: 1px solid var(--muted);
-            line-height: 1.5; margin-top: 2px; border-radius: 3px;
-        }
+/* ── DECK ── */
+#ui-deck {
+    flex: 0 0 auto;
+    width: 100%;
+    background: var(--deck);
+    border-top: 1.5px solid var(--accent);
+    display: flex; flex-direction: column;
+    box-shadow: 0 -1px 0 rgba(74,125,168,0.15), 0 -14px 40px rgba(0,0,0,0.7);
+    background-image:
+        linear-gradient(var(--deck), var(--deck)),
+        repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.07) 3px, rgba(0,0,0,0.07) 4px);
+}
+body.in-walk #ui-deck       { opacity: 0.28; transition: opacity 0.4s; }
+body.in-walk #ui-deck.peek  { opacity: 0.96; transition: opacity 0.15s; }
+#ui-deck.collapsed .deck-body { display: none; }
 
-        /* ── BUTTONS ── */
-        .icon-btn {
-            background: transparent; border: 1px solid rgba(153,202,222,0.07);
-            color: var(--muted); font-family: inherit; font-size: 0.6rem;
-            letter-spacing: 2px; padding: 2px 7px; cursor: pointer;
-            transition: all 0.3s; border-radius: 4px;
-        }
-        .icon-btn:hover { background: rgba(65,104,142,0.1); border-color: var(--accent); color: var(--hi); }
-        .icon-btn.active  { background: rgba(65,104,142,0.14); border-color: var(--accent); color: var(--hi); }
-        .icon-btn.walk-on { background: var(--ember); border-color: transparent; color: var(--hi); box-shadow: 0 2px 8px rgba(79,58,55,0.5); }
+/* ── DECK TAB ── */
+#deck-tab {
+    height: 36px; min-height: 36px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 14px 0 16px;
+    font-size: 0.75rem; letter-spacing: 3px; text-transform: lowercase;
+    cursor: pointer; color: var(--text-sec);
+    border-bottom: 1px solid rgba(74,125,168,0.07);
+    transition: background 0.2s;
+}
+#deck-tab:hover { background: rgba(74,125,168,0.05); }
+#deck-toggle {
+    color: var(--accent2); margin-right: 8px;
+    display: inline-block;
+    transition: transform 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+#ui-deck.collapsed #deck-toggle { transform: rotate(-90deg); }
 
-        /* ── OVERLAYS ── */
-        #walk-crosshair {
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
-            width: 14px; height: 14px; pointer-events: none; z-index: 50;
-            display: none; opacity: 0.35;
-        }
-        #walk-crosshair::before, #walk-crosshair::after {
-            content: ''; position: absolute; background: var(--hi);
-        }
-        #walk-crosshair::before { width: 1px; height: 100%; top:0; left:50%; transform: translateX(-50%); }
-        #walk-crosshair::after  { height: 1px; width: 100%; top:50%; left:0; transform: translateY(-50%); }
-        #walk-crosshair.target { opacity: 0.85; }
-        #walk-crosshair.target::before, #walk-crosshair.target::after { background: var(--grab); }
+/* ── DECK BODY ── */
+.deck-body {
+    display: flex; flex-direction: row;
+    padding: 10px 14px; gap: 0;
+    overflow-y: auto; max-height: 44vh;
+}
+.deck-body::-webkit-scrollbar      { width: 3px; }
+.deck-body::-webkit-scrollbar-track { background: transparent; }
+.deck-body::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 2px; }
 
-        #walk-hud {
-            display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 40;
-            padding: 10px 16px;
-            background: linear-gradient(to bottom, rgba(26,28,27,0.88), transparent);
-            font-size: 0.38rem; letter-spacing: 4px; text-transform: lowercase;
-            pointer-events: none; justify-content: space-between; align-items: center;
-        }
-        .whud-title { color: var(--hi); }
-        .whud-stats { display: flex; gap: 14px; }
-        .whud-stat  { color: var(--muted); }
-        .whud-stat span { color: var(--hi); }
-        #wh-status { color: var(--gold-hi); }
+/* ── COLUMNS ── */
+.col { display: flex; flex-direction: column; gap: 5px; padding-right: 16px; }
+.col:not(:last-child) { border-right: 1px solid rgba(74,125,168,0.08); margin-right: 16px; }
+.col-views { flex: 2.2; }
+.col-tune  { flex: 1.6; }
+.col-move  { flex: 1.6; }
+.col-cam   { flex: 1.6; }
+.col-atmos { flex: 1.6; }
+.col-tele  { flex: 1; min-width: 96px; }
 
-        /* ── ODM DUAL JOYSTICKS ── */
-        .odm-joy {
-            display: none; position: fixed; bottom: 64px; z-index: 50;
-            width: 88px; height: 88px; border-radius: 50%;
-            background: rgba(26,28,27,0.65);
-            border: 1.5px dashed var(--accent);
-            box-shadow: 0 4px 16px rgba(65,104,142,0.2);
-            pointer-events: none; touch-action: none;
-        }
-        #joyL { left: 20px; }
-        #joyR { right: 20px; }
-        .odm-knob {
-            position: absolute; width: 40px; height: 40px; border-radius: 50%;
-            background: rgba(65,104,142,0.18); border: 1.5px solid var(--accent);
-            top: 50%; left: 50%; transform: translate(-50%,-50%);
-            pointer-events: none; will-change: transform; transition: background 0.1s, box-shadow 0.1s;
-        }
-        #knobL.boost {
-            background: rgba(138,112,64,0.45); border-color: var(--gold-hi);
-            box-shadow: 0 0 22px rgba(212,184,106,0.5);
-        }
-        #knobR.active {
-            background: rgba(30,80,50,0.5); border-color: var(--grab);
-            box-shadow: 0 0 22px rgba(128,192,160,0.5);
-        }
-        .odm-joy .j-lbl {
-            position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
-            font-size: 0.38rem; letter-spacing: 3px; color: var(--accent); white-space: nowrap;
-        }
+.col-lbl {
+    font-size: 0.65rem; letter-spacing: 2px; color: var(--muted);
+    text-transform: lowercase;
+    border-bottom: 1px solid rgba(212,176,128,0.12);
+    padding-bottom: 4px; margin-bottom: 3px;
+}
 
-        /* ── FLASH ── */
-        #grab-flash {
-            position: fixed; inset: 0; pointer-events: none; z-index: 45;
-            background: rgba(30,80,50,0.12); opacity: 0; transition: opacity 0.07s;
-        }
-        #grab-flash.pop { opacity: 1; }
+/* ── VIEW SLOTS ── */
+.view-pair { display: flex; gap: 6px; }
+.view-slot {
+    flex: 1; display: flex; flex-direction: column; gap: 3px;
+    background: rgba(6,38,54,0.4);
+    border: 1px dashed var(--text-dim);
+    padding: 5px 7px; border-radius: 4px; transition: all 0.35s;
+}
+.view-slot.loaded {
+    border-color: var(--accent2); border-style: solid;
+    background: rgba(74,125,168,0.08);
+    box-shadow: inset 0 0 12px rgba(74,125,168,0.05);
+}
+#slot-top { opacity: 1; }
+#slot-top.loaded { opacity: 0.80; }
+.view-slot-lbl { font-size: 0.65rem; color: var(--text-sec); letter-spacing: 2px; }
 
-        /* ── TOAST ── */
-        #toast-container { position: fixed; top: 18px; right: 16px; z-index: 9999; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
-        .toast {
-            background: rgba(30,34,32,0.96); border-bottom: 1px solid var(--accent);
-            color: var(--hi); padding: 5px 10px; font-size: 0.45rem; letter-spacing: 3px;
-            border-radius: 3px; box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-            animation: tIn 0.6s ease-out, tOut 1.5s ease-in 2.5s forwards;
-        }
-        @keyframes tIn  { from { opacity:0; transform: translateY(-8px); } to { opacity:1; transform: translateY(0); } }
-        @keyframes tOut { from { opacity:1; } to { opacity:0; } }
-        @keyframes pulse { 0%,100% { opacity:0.8; } 50% { opacity:0.25; } }
-        .forming { animation: pulse 1.8s ease-in-out infinite; color: var(--hi) !important; }
+/* ── FILE INPUT ── */
+input[type="file"] { font-size: 0.55rem; color: var(--text-sec); background: none; border: none; width: 100%; cursor: pointer; }
+input[type="file"]::file-selector-button {
+    background: rgba(74,125,168,0.10); border: 1px solid rgba(74,125,168,0.25);
+    color: var(--hi); font-family: inherit; font-size: 0.62rem;
+    letter-spacing: 1px; padding: 4px 8px; cursor: pointer;
+    border-radius: 3px; transition: all 0.25s;
+}
+input[type="file"]::file-selector-button:hover {
+    background: var(--accent); border-color: var(--accent2);
+    color: var(--deck); box-shadow: 0 0 10px var(--glow);
+}
 
-        @media(max-width:5100px) {
-            .deck-body { flex-direction: column; }
-            .col:not(:last-child) { border-right: none; border-bottom: 1px solid rgba(153,202,222,0.03); padding-right: 0; margin-right: 0; padding-bottom: 5px; margin-bottom: 3px; }
-        }
-    
-    /* tumble vignette (fumble feedback) */
-    #tumble-fx { position:fixed; inset:0; z-index:35; pointer-events:none; opacity:0;
-        background:radial-gradient(ellipse at center, transparent 40%, rgba(138,3,3,0.45) 100%);
-        transition:opacity 0.15s; }
-    #tumble-fx.on { opacity:1; }
-</style>
+/* ── RANGE SLIDERS ── */
+input[type="range"] {
+    width: 100%; accent-color: var(--accent2); height: 3px;
+    background: rgba(74,125,168,0.15); cursor: pointer;
+    -webkit-appearance: none; margin: 5px 0;
+    touch-action: manipulation; border-radius: 2px;
+}
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent2); cursor: pointer;
+    border: 1.5px solid var(--bg);
+    box-shadow: 0 0 8px var(--glow), 0 0 0 2px rgba(93,158,201,0.2);
+    transition: box-shadow 0.15s, transform 0.1s;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 14px var(--glow2), 0 0 0 3px rgba(93,158,201,0.3);
+    transform: scale(1.15);
+}
+input[type="range"]:active::-webkit-slider-thumb {
+    background: var(--hi);
+    box-shadow: 0 0 18px var(--glow2);
+}
+.range-row { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
+.range-lbl {
+    font-size: 0.62rem; color: var(--text-sec); text-transform: lowercase;
+    display: flex; justify-content: space-between; letter-spacing: 1px;
+}
+.range-val { color: var(--hi); font-size: 0.68rem; letter-spacing: 0; }
+
+/* ── TELEMETRY ── */
+.stat-row {
+    font-size: 0.62rem; color: var(--text-sec);
+    display: flex; justify-content: space-between;
+    padding: 3px 0; letter-spacing: 1px;
+    border-bottom: 1px solid rgba(74,125,168,0.6);
+}
+.stat-v { color: var(--hi); font-size: 0.68rem; letter-spacing: 0; }
+
+/* ── SYM NOTE ── */
+.sym-note {
+    font-size: .2rem; color: var(--text-sec);
+    padding: 6px 8px;
+    background: rgba(6,38,54,0.5);
+    border: 1px solid rgba(74,125,168,0.10);
+    line-height: 1.8; margin-top: 4px; border-radius: 4px;
+    letter-spacing: 0.5px;
+}
+
+/* ── BUTTONS ── */
+.mood-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px;
+}
+.mood-btn {
+    font-family: inherit; font-size: 0.56rem; letter-spacing: 1.2px;
+    text-transform: uppercase; padding: 6px 4px; cursor: pointer;
+    background: rgba(10,16,24,0.5); color: rgba(150,180,205,0.65);
+    border: 1px solid rgba(74,125,168,0.22); border-radius: 3px;
+    transition: all 0.2s;
+}
+.mood-btn:hover { color: rgba(190,215,235,0.95); border-color: rgba(74,125,168,0.5); }
+.mood-btn.active {
+    background: rgba(74,125,168,0.28); color: #dceaf6;
+    border-color: rgba(120,180,225,0.75);
+}
+.wx-row { display: flex; gap: 4px; margin-bottom: 8px; }
+.wx-row .mood-btn { flex: 1; }
+.icon-btn {
+    background: rgba(6,38,54,0.6);
+    border: 1px solid rgba(74,125,168,0.18);
+    color: var(--text-sec); font-family: inherit;
+    font-size: 0.65rem; letter-spacing: 2px;
+    padding: 5px 10px; cursor: pointer;
+    transition: all 0.2s; border-radius: 4px; min-height: 32px;
+}
+.icon-btn:hover {
+    background: rgba(74,125,168,0.3); border-color: var(--accent2);
+    color: var(--hi); box-shadow: 0 0 12px rgba(74,125,168,0.6);
+}
+.icon-btn.active {
+    background: rgba(74,125,168,0.8); border-color: var(--accent2);
+    color: var(--hi);
+    box-shadow: 0 0 16px rgba(74,125,168,0.25), inset 0 0 8px rgba(74,125,168,0.08);
+}
+.icon-btn.walk-on {
+    background: var(--ember); border-color: rgba(192,64,64,0.4);
+    color: var(--gold-hi);
+    box-shadow: 0 2px 12px rgba(107,56,48,0.6); letter-spacing: 1.5px;
+}
+
+/* ── WALK CROSSHAIR ── */
+#walk-crosshair {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 18px; height: 18px; pointer-events: none; z-index: 50;
+    display: none; opacity: 0.8;
+}
+#walk-crosshair::before, #walk-crosshair::after {
+    content: ''; position: absolute; background: var(--hi);
+}
+#walk-crosshair::before { width: 1px; height: 100%; top:0; left:50%; transform: translateX(-50%); }
+#walk-crosshair::after  { height: 1px; width: 100%; top:50%; left:0; transform: translateY(-50%); }
+#walk-crosshair.target {
+    opacity: 1;
+    animation: xhair-pulse 1.2s ease-in-out infinite;
+}
+#walk-crosshair.target::before,
+#walk-crosshair.target::after { background: var(--grab); }
+@keyframes xhair-pulse {
+    0%,100% { filter: drop-shadow(0 0 3px var(--grab)); }
+    50%      { filter: drop-shadow(0 0 9px var(--grab)); opacity: 0.7; }
+}
+
+/* ── WALK HUD ── */
+#walk-hud {
+    display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 40;
+    padding: 12px 20px;
+    background: linear-gradient(to bottom, rgba(4,32,46,0.90), transparent);
+    font-size: 0.62rem; letter-spacing: 2px; text-transform: lowercase;
+    pointer-events: none; justify-content: space-between; align-items: center;
+}
+.whud-title { color: var(--hi); letter-spacing: 4px; }
+.whud-stats { display: flex; gap: 18px; }
+.whud-stat  { color: var(--text-sec); }
+.whud-stat span { color: var(--hi); }
+#wh-status  { color: var(--gold-hi); }
+
+/* ── ODM DUAL JOYSTICKS ── */
+.odm-joy {
+    display: none; position: fixed; bottom: 70px; z-index: 50;
+    width: 96px; height: 96px; border-radius: 50%;
+    background: rgba(4,20,28,0.72);
+    border: 1.5px solid rgba(74,125,168,0.35);
+    box-shadow: 0 4px 20px rgba(4,20,28,0.5), inset 0 0 20px rgba(74,125,168,0.04);
+    pointer-events: none; touch-action: none;
+}
+#joyL { left: 54px; }
+#joyR { right: 54px; }
+.odm-knob {
+    position: absolute; width: 44px; height: 44px; border-radius: 50%;
+    background: rgba(74,125,168,0.14); border: 1.5px solid rgba(93,158,201,0.6);
+    top: 50%; left: 50%; transform: translate(-50%,-50%);
+    pointer-events: none; will-change: transform;
+    transition: background 0.12s, box-shadow 0.12s, border-color 0.12s;
+}
+#knobL.boost {
+    background: rgba(138,112,64,0.50); border-color: var(--gold-hi);
+    box-shadow: 0 0 24px var(--glow-gold);
+}
+#knobR.active {
+    background: rgba(20,90,45,0.55); border-color: var(--grab);
+    box-shadow: 0 0 24px var(--glow-grab);
+}
+.odm-joy .j-lbl {
+    position: absolute; top: -16px; left: 50%; transform: translateX(-50%);
+    font-size: 0.50rem; letter-spacing: 2px; color: var(--accent2); white-space: nowrap;
+}
+
+/* ── GRAB FLASH ── */
+#grab-flash {
+    position: fixed; inset: 0; pointer-events: none; z-index: 45;
+    background: radial-gradient(ellipse at center, rgba(112,130,144,0.9) 0%, transparent 70%);
+    opacity: 0; transition: opacity 0.07s;
+}
+#grab-flash.pop { opacity: 1; }
+
+/* ── TUMBLE FX ── */
+#tumble-fx {
+    position: fixed; inset: 0; z-index: 35; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 35%, rgba(160,30,30,0.55) 100%);
+    transition: opacity 0.15s;
+}
+#tumble-fx.on { opacity: 1; }
+
+/* ── TOAST ── */
+#toast-container {
+    position: fixed; top: 20px; right: 18px; z-index: 9999;
+    display: flex; flex-direction: column; gap: 6px; pointer-events: none;
+}
+.toast {
+    background: rgba(4,20,28,0.96);
+    border-left: 2px solid var(--accent2);
+    border-bottom: 1px solid rgba(74,125,168,0.3);
+    color: var(--hi); padding: 6px 12px;
+    font-size: 0.62rem; letter-spacing: 2px; border-radius: 3px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5), 0 0 20px rgba(74,125,168,0.08);
+    animation: tIn 0.5s cubic-bezier(0.2,0,0,1), tOut 1.5s ease-in 2.5s forwards;
+}
+@keyframes tIn  { from { opacity:0; transform: translateY(-10px) translateX(6px); } to { opacity:1; transform: translateY(0) translateX(0); } }
+@keyframes tOut { from { opacity:1; } to { opacity:0; transform: translateY(-4px); } }
+@keyframes pulse { 0%,100% { opacity:0.85; } 50% { opacity:0.25; } }
+.forming { animation: pulse 1.6s ease-in-out infinite; color: var(--hi) !important; }
+
+/* ── DROP HINT ── */
+#drop-hint {
+    position: absolute; inset: 0; pointer-events: none; z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.65rem; letter-spacing: 6px;
+    color: rgba(184,221,239,0.18); text-transform: lowercase;
+    opacity: 0; transition: opacity 1s;
+}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 640px) {
+    .deck-body { flex-direction: column; gap: 8px; }
+    .col:not(:last-child) {
+        border-right: none; border-bottom: 1px solid rgba(74,125,168,0.06);
+        padding-right: 0; margin-right: 0; padding-bottom: 8px; margin-bottom: 4px;
+    }
+    .mood-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px;
+}
+.mood-btn {
+    font-family: inherit; font-size: 0.56rem; letter-spacing: 1.2px;
+    text-transform: uppercase; padding: 6px 4px; cursor: pointer;
+    background: rgba(10,16,24,0.5); color: rgba(150,180,205,0.65);
+    border: 1px solid rgba(74,125,168,0.22); border-radius: 3px;
+    transition: all 0.2s;
+}
+.mood-btn:hover { color: rgba(190,215,235,0.95); border-color: rgba(74,125,168,0.5); }
+.mood-btn.active {
+    background: rgba(74,125,168,0.28); color: #dceaf6;
+    border-color: rgba(120,180,225,0.75);
+}
+.wx-row { display: flex; gap: 4px; margin-bottom: 8px; }
+.wx-row .mood-btn { flex: 1; }
+.icon-btn { font-size: 0.60rem; padding: 6px 9px; letter-spacing: 1.5px; }
+    #deck-tab  { padding: 0 10px 0 12px; }
+}
+    </style>
 </head>
 <body>
 
 <div id="tumble-fx"></div>
 <div id="canvas-container">
-    <div id="drop-hint" style="position:absolute;inset:0;pointer-events:none;z-index:20;display:flex;align-items:center;justify-content:center;font-size:0.55rem;letter-spacing:6px;color:rgba(153,202,222,0.2);text-transform:lowercase;opacity:0;transition:opacity 1s;">d r o p &nbsp; i m a g e s</div>
+    <div id="drop-hint">image</div>
 </div>
 
 <div id="toast-container"></div>
@@ -258,7 +410,7 @@
 <div id="grab-flash"></div>
 
 <div id="walk-hud">
-    <div class="whud-title">∴ &nbsp; p a n d r a _ o s &nbsp; / / &nbsp; o d m</div>
+    <div class="whud-title">voxel</div>
     <div class="whud-stats">
         <div class="whud-stat">pos <span id="wh-pos">—</span></div>
         <div class="whud-stat">spd <span id="wh-spd">—</span></div>
@@ -272,31 +424,42 @@
 
 <div id="ui-deck">
     <div id="deck-tab">
-        <span><span id="deck-toggle">▼</span> p a n d r a _ o s &nbsp; / / &nbsp; o d m</span>
+        <span><span id="deck-toggle">▼</span> boxvox</span>
         <div style="display:flex;gap:6px;">
-            <button class="icon-btn" id="btn-walk-toggle">w a n d e r</button>
-            <button class="icon-btn" id="btn-auto-rotate">d r i f t</button>
-            <button class="icon-btn" id="btn-reset-cam">r e t u r n</button>
-            <button class="icon-btn" id="btn-screenshot">k e e p</button>
+            <button class="icon-btn" id="btn-walk-toggle">wander</button>
+            <button class="icon-btn" id="btn-auto-rotate">drift</button>
+            <button class="icon-btn" id="btn-hull">hull</button>
+            <button class="icon-btn" id="btn-reset-cam">return</button>
+            <button class="icon-btn" id="btn-screenshot">keep</button>
         </div>
     </div>
 
     <div class="deck-body">
         <div class="col col-views">
             <div class="col-lbl">directions</div>
+            <div style="margin-bottom:6px;">
+                <input type="file" id="load-all" accept="image/*" multiple>
+                <div style="font-size:0.5rem;color:var(--muted);letter-spacing:1px;margin-top:2px;">pick up to 4 at once → front · side · top · bottom</div>
+            </div>
             <div class="view-pair">
                 <div class="view-slot" id="slot-front">
-                    <div class="view-slot-lbl">f r o n t</div>
+                    <div class="view-slot-lbl">front</div>
                     <input type="file" id="load-front" accept="image/*">
                 </div>
                 <div class="view-slot" id="slot-side">
-                    <div class="view-slot-lbl">s i d e</div>
+                    <div class="view-slot-lbl">side</div>
                     <input type="file" id="load-side" accept="image/*">
                 </div>
             </div>
-            <div class="view-slot" id="slot-top">
-                <div class="view-slot-lbl">t o p &nbsp;<span style="float:right;font-size:0.36rem;color:var(--muted);">fading</span></div>
-                <input type="file" id="load-top" accept="image/*">
+            <div class="view-pair">
+                <div class="view-slot" id="slot-top">
+                    <div class="view-slot-lbl">top</div>
+                    <input type="file" id="load-top" accept="image/*">
+                </div>
+                <div class="view-slot" id="slot-bottom">
+                    <div class="view-slot-lbl">bottom</div>
+                    <input type="file" id="load-bottom" accept="image/*">
+                </div>
             </div>
             <div class="sym-note">
                 <span style="color:var(--hi)">left stick</span> &nbsp;move · push forward = gas boost<br>
@@ -309,23 +472,23 @@
         <div class="col col-tune">
             <div class="col-lbl">memory</div>
             <div class="range-row">
-                <div class="range-lbl">density <span class="range-val" id="v-resolution">80</span>³</div>
-                <input type="range" id="resolution" min="4" max="80" step="4" value="80">
+                <div class="range-lbl">density <span class="range-val" id="v-resolution">64</span>³</div>
+                <input type="range" id="resolution" min="4" max="80" step="4" value="64">
             </div>
             <div class="range-row">
-                <div class="range-lbl">shadows <span class="range-val" id="v-lumaCarve">0.60</span></div>
-                <input type="range" id="lumaCarve" min="0" max="1" step="0.01" value="0.6">
+                <div class="range-lbl">shadows <span class="range-val" id="v-lumaCarve">0.10</span></div>
+                <input type="range" id="lumaCarve" min="0" max="1" step="0.01" value="0.1">
             </div>
             <div class="range-row">
                 <div class="range-lbl">softness <span class="range-val" id="v-sculpt">4</span>px</div>
                 <input type="range" id="sculpt" min="0" max="80" step="1" value="4">
             </div>
             <div class="range-row">
-                <div class="range-lbl">loss <span class="range-val" id="v-threshold">40</span></div>
-                <input type="range" id="threshold" min="0" max="180" value="40">
+                <div class="range-lbl">loss <span class="range-val" id="v-threshold">2</span></div>
+                <input type="range" id="threshold" min="0" max="20" value="2">
             </div>
             <div style="margin-top:3px;">
-                <div class="range-lbl" style="cursor:pointer;border:1px solid rgba(153,202,222,0.07);padding:2px 5px;justify-content:center;" id="btn-color">
+                <div class="range-lbl" style="cursor:pointer;border:1px solid rgba(74,125,168,0.22);padding:4px 8px;justify-content:center;border-radius:3px;transition:all 0.2s;" id="btn-color">
                     color &nbsp;<span class="range-val" id="v-color">source</span>
                 </div>
             </div>
@@ -341,12 +504,20 @@
             <div id="cam-sliders"></div>
         </div>
 
+        <div class="col col-atmos">
+            <div class="col-lbl">atmosphere</div>
+            <div class="mood-grid" id="mood-grid"></div>
+            <div class="col-lbl" style="margin-top:2px">weather override</div>
+            <div class="wx-row" id="wx-row"></div>
+            <div id="atmos-sliders"></div>
+        </div>
+
         <div class="col col-tele">
             <div class="col-lbl">telemetry</div>
             <div class="stat-row">state <span class="stat-v" id="s-state">idle</span></div>
             <div class="stat-row">voxels <span class="stat-v" id="s-vox">0</span></div>
-            <div class="stat-row">grid <span class="stat-v" id="s-grid">80³</span></div>
-            <div class="stat-row">views <span class="stat-v" id="s-views">0/3</span></div>
+            <div class="stat-row">grid <span class="stat-v" id="s-grid">64³</span></div>
+            <div class="stat-row">views <span class="stat-v" id="s-views">0/4</span></div>
             <div class="stat-row">build <span class="stat-v" id="s-build-time">—</span></div>
             <div class="stat-row">mode <span class="stat-v" id="s-mode">orbit</span></div>
         </div>
@@ -358,11 +529,12 @@
     <canvas id="canv-front"></canvas>
     <canvas id="canv-side"></canvas>
     <canvas id="canv-top"></canvas>
+    <canvas id="canv-bottom"></canvas>
 </div>
 
 <!-- ═══════════════════════════════════════════════ WORKER ══ -->
 <script type="js/worker" id="voxel-worker">
-    const cache = { front:null, side:null, top:null, thresh:-1, dirty:{front:true,side:true,top:true} };
+    const cache = { front:null, side:null, top:null, bottom:null, thresh:-1, dirty:{front:true,side:true,top:true,bottom:true} };
     function sqAdd(dSq, step) { return dSq + 2*step*Math.sqrt(dSq) + step*step; }
 
     function extractSDF(imgData, w, h, thresh) {
@@ -414,13 +586,14 @@
         if(msg.type==='update_image'){cache[msg.view]={imgData:msg.imgData,w:msg.imgData.width,h:msg.imgData.height};cache.dirty[msg.view]=true;return;}
         if(msg.type==='build'){
             const t0=performance.now(),{cfg,jobId}=msg;
-            if(cfg.threshold!==cache.thresh){cache.dirty.front=cache.dirty.side=cache.dirty.top=true;cache.thresh=cfg.threshold;}
+            if(cfg.threshold!==cache.thresh){cache.dirty.front=cache.dirty.side=cache.dirty.top=cache.dirty.bottom=true;cache.thresh=cfg.threshold;}
             if(cache.dirty.front&&cache.front){cache.front.sdf=extractSDF(cache.front.imgData,cache.front.w,cache.front.h,cfg.threshold);cache.dirty.front=false;}
             if(cache.dirty.side&&cache.side){cache.side.sdf=extractSDF(cache.side.imgData,cache.side.w,cache.side.h,cfg.threshold);cache.dirty.side=false;}
             if(cache.dirty.top&&cache.top){cache.top.sdf=extractSDF(cache.top.imgData,cache.top.w,cache.top.h,cfg.threshold);cache.dirty.top=false;}
+            if(cache.dirty.bottom&&cache.bottom){cache.bottom.sdf=extractSDF(cache.bottom.imgData,cache.bottom.w,cache.bottom.h,cfg.threshold);cache.dirty.bottom=false;}
             if(!cache.front||!cache.side){self.postMessage({type:'done',jobId,activeCount:0,time:performance.now()-t0});return;}
-            const sdfF=cache.front.sdf,sdfS=cache.side.sdf,sdfT=cache.top?cache.top.sdf:null;
-            const useTop=!!sdfT,res=cfg.resolution,maxInstances=res*res*res;
+            const sdfF=cache.front.sdf,sdfS=cache.side.sdf,sdfT=cache.top?cache.top.sdf:null,sdfB=cache.bottom?cache.bottom.sdf:null;
+            const useTop=!!sdfT,useBottom=!!sdfB,res=cfg.resolution,maxInstances=res*res*res;
             const matrices=new Float32Array(maxInstances*16),colors=new Float32Array(maxInstances*3);
 
             const span = cfg.span;
@@ -466,20 +639,37 @@
                 if (dSSq === 0) return null;
 
                 let idxT = 0;
-                if (useTop) {
+                if (useTop && py >= 0.5) {                 // top silhouette governs the upper half
                     const imgY_T = Math.floor(pz * (sdfT.h - 1)) * sdfT.w;
                     const imgX_T = Math.floor(px * (sdfT.w - 1));
                     idxT = imgY_T + imgX_T;
                     if (sdfT.dist[idxT] === 0) return null;
                 }
 
+                let idxBt = 0;
+                if (useBottom && py < 0.5) {                // bottom silhouette governs the lower half
+                    const imgY_Bt = Math.floor(pz * (sdfB.h - 1)) * sdfB.w;
+                    const imgX_Bt = Math.floor(px * (sdfB.w - 1));
+                    idxBt = imgY_Bt + imgX_Bt;
+                    if (sdfB.dist[idxBt] === 0) return null;
+                }
+
                 if (lumaP > 0) {
+                    // Softened carve: the shell removed is capped at 0.7 so even at max
+                    // slider a solid core always remains — the whole 0..1 range now
+                    // sculpts gradually instead of nuking everything past a hair.
                     const ny = (1.0 - py) * 2.0 - 1.0;
                     const nx = px * 2.0 - 1.0;
                     const nz = pz * 2.0 - 1.0;
-                    if (Math.abs(nz) > 1.0 - lumaP * (1.0 - sdfF.luma[idxF])) return null;
-                    if (Math.abs(nx) > 1.0 - lumaP * (1.0 - sdfS.luma[idxS])) return null;
-                    if (useTop && Math.abs(ny) > 1.0 - lumaP * (1.0 - sdfT.luma[idxT])) return null;
+                    const CAP = 0.7;
+                    const cF = Math.min(CAP, lumaP * (1.0 - sdfF.luma[idxF]));
+                    const cS = Math.min(CAP, lumaP * (1.0 - sdfS.luma[idxS]));
+                    if (Math.abs(nz) > 1.0 - cF) return null;
+                    if (Math.abs(nx) > 1.0 - cS) return null;
+                    if (useTop) {
+                        const cT = Math.min(CAP, lumaP * (1.0 - sdfT.luma[idxT]));
+                        if (Math.abs(ny) > 1.0 - cT) return null;
+                    }
                 }
 
                 if (cfg.sculpt > 0 && dFSq <= sculptRSq && dSSq <= sculptRSq) {
@@ -593,21 +783,25 @@
 
 <!-- ═══════════════════════════════════════════════ MAIN ══ -->
 <script>
-    // ── WORLD CONSTANTS (finvox octree scale) ─────────────────────
-    const WORLD_SCALE = 10;   // 10x bigger playfield
-    const BASE_SPAN   = 9000;
-    const SPAN        = BASE_SPAN * WORLD_SCALE;
-    const WORLD_HALF  = SPAN / 2;
+    // ── WORLD CONSTANTS ───────────────────────────────────────────
+    // Unit system: 1 unit = 1 meter. Player body = 1.8u tall.
+    // Monument spans 800u wide and up to 800u tall → 444:1 vs the
+    // player. Scale FEEL comes from the movement numbers below being
+    // proportional to a human body, not from making SPAN bigger —
+    // a 90,000u world with 620u/s movement reads *smaller* because
+    // you cross it like it's a pebble.
+    const SPAN        = 1600;
     const WORLD_FLOOR = 0;
-    const CAMERA_FAR  = 999116;
-    const BOUND       = SPAN * 2;
+    const CAMERA_FAR  = 12000;
+    const BOUND       = SPAN * 1.5;   // roam room beyond the monument
     const PI_2        = Math.PI/2;
 
     // ── FORGE CFG — direct slider values, negative gap = seamless ──
+    // (defaults MUST match the HTML slider values — synced at init)
     let CFG = {
-        resolution: 100,
-        threshold:  100,
-        blockGap:   -.001,
+        resolution: 80,          // leaf = SPAN/res = 12.5u; 10u at max 80
+        threshold:  2,
+        blockGap:   -.001/100,
         sculpt:     4,
         lumaCarve:  0.1,
         colorMode:  'source',
@@ -616,97 +810,131 @@
     };
 
     // ═══════════════════════════════════════════════════════════
-    // [ODM] MOVEMENT CONFIG — every value here is slider-driven.
-    // Architecture is the locked Test_2 base; defaults are scaled
-    // to this world and carry the known bug-fixes:
-    //   boostCone 0.6 (float, NOT 650) · camLag 0.22 (NOT 22)
-    //   smokeBase < smokeMaxRate (correct ordering)
-    // ═══════════════════════════════════════════════════════════
-    // ═══════════════════════════════════════════════════════════
-    // [ODM] MOVEMENT — toomuch (ODM_CORE) physics model, values
-    // rescaled to the 800-unit octree world. Smallest voxel leaf
-    // at max res is ~10u ≈ 2.5x the player model, per design.
-    // Known fixes retained: boostCone float · camLag decimal ·
+    // [ODM] MOVEMENT — toomuch (ODM_CORE) physics model, tuned to
+    // the 1u = 1m world. The scale trick: on FOOT you move like a
+    // human (~5 m/s sprint, real-ish gravity) so the monument feels
+    // like a mountain; on the WIRE you hit 80 m/s and it feels like
+    // flying between skyscrapers. That contrast IS the ginormity.
+    // Known fixes retained: boostCone float · camera unsmoothed ·
     // smokeBase < smokeMaxRate ordering.
     // ═══════════════════════════════════════════════════════════
     const M = {
-        gravity:      -120,
-        airDrag:      0.03,
-        groundFric:   9,
-        accelGround:  180,
-        accelAir:     220,
-        boostAccel:   200,
+        gravity:      -22,    // ~2.2x real — snappy but proportional
+        airDrag:      0.085,
+        groundFric:   5,
+        accelGround:  23,     // terminal walk ≈ accel/fric ≈ 5 m/s
+        accelAir:     40,
+        boostAccel:   60,
         boostCone:    0.6,
-        hookPull:     200,
-        ropeNorm:     60,
-        maxRopeDist:  90000,
-        maxSpeed:     620,
-        radius:       1,
-        height:       2,      // half-height; full body ~2*height
+        hookPull:     90,
+        ropeNorm:     40,     // pull ramps up to 3x over this distance
+        maxRopeDist:  1400,    // half the span — climb in hops, feel the size
+        maxSpeed:     200,     // 288 km/h on the wire; span crossing ~10s
+        radius:       0.35,
+        height:       0.9,    // half-height; full body 1.8u = 1.8m
 
-        eyeOffset:    2,
-        camLag:       0.2,
+        // ── CONTROL FEEL ──
+        // Accel alone can't steer: pushing 40 m/s² sideways into a 100 m/s
+        // vector barely bends it, which is why fast flight felt like arguing
+        // with a truck. turnAuthority ROTATES the velocity vector toward the
+        // stick at a fixed rad/s and keeps the speed — that's the snap.
+        turnAuthority: 3.4,   // rad/s of steering at full stick (0 = old feel)
+        airTurnScale:  0.75,  // less bite in the air than on foot
+        brakeAccel:    75,    // stick against your heading = real brake
+        brakeCone:     0.35,  // how opposed the stick must be to count
+        brakeVertical: 1.6,   // braking also grabs air vertically
+        reelRate:      10,    // m/s the winch shortens the rope
+        ropeStiff:     0.85,  // 0 = spring (floaty) · 1 = taut rope, no stretch
+
+        eyeOffset:    0.72,   // eye at 1.62m from feet (0.9 + 0.72)
         hFov:         75,
         hFovMax:      85,
         fovExpandRate:0.5,
         fovRecoverRate:0.3,
         stickSens:    0.06,
-        stickRadius:  120,
-        rollScale:    0.03,
+        stickRadius:  95,
+        rollScale:    0.004,
         rollMax:      0.22,
+        rollRate:     0.08,   // per-frame-at-60 lerp, now dt-corrected
 
-        // tumble (fumble on hard impact)
-        tumbleThresh: 2000,
+        // tumble (fumble on hard impact) — thresholds are m/s now
+        tumbleThresh: 45,
         tumbleTime:   0.8,
         tumbleSpin:   9,
 
         smokeMax:     600,
-        smokeBase:    6,      // low-speed rate  (LOW)
+        smokeBase:    12,      // low-speed rate  (LOW)
         smokeMaxRate: 90,     // top-speed rate  (HIGH)
-        smokeSize:    50,
-        faceRadius:   140,
+        smokeSize:    11.4,
+        faceRadius:   8,
         lifeMin:      0.4,
-        lifeMax:      6,
-        upDrift:      25,
-        spread:       30,
+        lifeMax:      2.5,
+        upDrift:      0.5,
+        spread:       5,
     };
 
     // ── SLIDER TABLES — one row each, generated + bound in one go ──
+    // Every range brackets its default and covers a *perceptible*
+    // low ↔ high. In meters / m/s / m/s² now, so the numbers mean
+    // something: gravity 22 ≈ 2.2x earth, max speed 80 = 288 km/h.
     const MOVE_SLIDERS = [
-        { lbl:'gravity',     min:5,   max:200,  step:1,    get:()=>-M.gravity,      set:v=>M.gravity=-v },
-        { lbl:'ground accel',min:20,  max:3000, step:10,   get:()=>M.accelGround,   set:v=>M.accelGround=v },
-        { lbl:'air accel',   min:20,  max:3000, step:10,   get:()=>M.accelAir,      set:v=>M.accelAir=v },
-        { lbl:'gas boost',   min:20,  max:3000, step:10,   get:()=>M.boostAccel,    set:v=>M.boostAccel=v },
-        { lbl:'boost cone',  min:0,   max:1,    step:0.05, get:()=>M.boostCone,     set:v=>M.boostCone=v },
-        { lbl:'hook pull',   min:20,  max:3000, step:10,   get:()=>M.hookPull,      set:v=>M.hookPull=v },
-        { lbl:'pull ramp',   min:5,   max:200,  step:1,    get:()=>M.ropeNorm,      set:v=>M.ropeNorm=v },
-        { lbl:'rope reach',  min:500, max:30000,step:100,  get:()=>M.maxRopeDist,   set:v=>M.maxRopeDist=v },
-        { lbl:'max speed',   min:100, max:15000,step:50,   get:()=>M.maxSpeed,      set:v=>M.maxSpeed=v },
-        { lbl:'air drag',    min:0,   max:0.2,  step:0.005,get:()=>M.airDrag,       set:v=>M.airDrag=v },
-        { lbl:'ground fric', min:0,   max:20,   step:0.5,  get:()=>M.groundFric,    set:v=>M.groundFric=v },
-        { lbl:'body radius', min:0.2, max:6,    step:0.1,  get:()=>M.radius,        set:v=>M.radius=v },
-        { lbl:'ride height', min:0.2, max:5,    step:0.1,  get:()=>M.height,        set:v=>M.height=v },
+        { lbl:'gravity',     min:2,    max:60,  step:0.5,  get:()=>-M.gravity,      set:v=>M.gravity=-v },
+        { lbl:'ground accel',min:5,    max:120, step:1,    get:()=>M.accelGround,   set:v=>M.accelGround=v },
+        { lbl:'air accel',   min:0,    max:80,  step:1,    get:()=>M.accelAir,      set:v=>M.accelAir=v },
+        { lbl:'gas boost',   min:5,    max:200, step:1,    get:()=>M.boostAccel,    set:v=>M.boostAccel=v },
+        { lbl:'boost cone',  min:0,    max:1,   step:0.05, get:()=>M.boostCone,     set:v=>M.boostCone=v },
+        { lbl:'turn snap',   min:0,    max:10,  step:0.1,  get:()=>M.turnAuthority, set:v=>M.turnAuthority=v },
+        { lbl:'air turn',    min:0,    max:1,   step:0.05, get:()=>M.airTurnScale,  set:v=>M.airTurnScale=v },
+        { lbl:'brake',       min:0,    max:200, step:5,    get:()=>M.brakeAccel,    set:v=>M.brakeAccel=v },
+        { lbl:'brake cone',  min:0,    max:0.9, step:0.05, get:()=>M.brakeCone,     set:v=>M.brakeCone=v },
+        { lbl:'reel rate',   min:0,    max:60,  step:1,    get:()=>M.reelRate,      set:v=>M.reelRate=v },
+        { lbl:'rope stiff',  min:0,    max:1,   step:0.05, get:()=>M.ropeStiff,     set:v=>M.ropeStiff=v },
+        { lbl:'hook pull',   min:10,   max:300, step:5,    get:()=>M.hookPull,      set:v=>M.hookPull=v },
+        { lbl:'pull ramp',   min:10,   max:200, step:5,    get:()=>M.ropeNorm,      set:v=>M.ropeNorm=v },
+        { lbl:'rope reach',  min:50,   max:1200,step:10,   get:()=>M.maxRopeDist,   set:v=>M.maxRopeDist=v },
+        { lbl:'max speed',   min:5,    max:200, step:5,    get:()=>M.maxSpeed,      set:v=>M.maxSpeed=v },
+        { lbl:'air drag',    min:0,    max:0.3, step:0.005,get:()=>M.airDrag,       set:v=>M.airDrag=v },
+        { lbl:'ground fric', min:0,    max:20,  step:0.5,  get:()=>M.groundFric,    set:v=>M.groundFric=v },
+        { lbl:'body radius', min:0.15, max:1.5, step:0.05, get:()=>M.radius,        set:v=>M.radius=v },
+        { lbl:'ride height', min:0.3,  max:2,   step:0.05, get:()=>M.height,        set:v=>M.height=v },
     ];
     const CAM_SLIDERS = [
-        { lbl:'eye offset',  min:0.2,  max:30,  step:0.2,  get:()=>M.eyeOffset,     set:v=>M.eyeOffset=v },
-        { lbl:'cam lag',     min:0.02, max:1,   step:0.01, get:()=>M.camLag,        set:v=>M.camLag=v },
+        { lbl:'eye offset',  min:0,    max:2,   step:0.02, get:()=>M.eyeOffset,     set:v=>M.eyeOffset=v },
         { lbl:'fov',         min:30,   max:110, step:1,    get:()=>M.hFov,          set:v=>M.hFov=v },
         { lbl:'fov max',     min:40,   max:130, step:1,    get:()=>M.hFovMax,       set:v=>M.hFovMax=v },
         { lbl:'fov expand',  min:0.02, max:1,   step:0.02, get:()=>M.fovExpandRate, set:v=>M.fovExpandRate=v },
-        { lbl:'fov recover', min:0.002,max:0.2, step:0.002,get:()=>M.fovRecoverRate,set:v=>M.fovRecoverRate=v },
+        { lbl:'fov recover', min:0.02, max:1,   step:0.02, get:()=>M.fovRecoverRate,set:v=>M.fovRecoverRate=v },
         { lbl:'look sens',   min:0.01, max:0.2, step:0.005,get:()=>M.stickSens,     set:v=>M.stickSens=v },
         { lbl:'lean amount', min:0,    max:0.02,step:0.0005,get:()=>M.rollScale,    set:v=>M.rollScale=v },
         { lbl:'lean max',    min:0,    max:0.6, step:0.01, get:()=>M.rollMax,       set:v=>M.rollMax=v },
-        { lbl:'smoke size',  min:0,    max:120, step:1,    get:()=>M.smokeSize,     set:v=>{M.smokeSize=v; if(pMat)pMat.size=v;} },
+        { lbl:'smoke size',  min:0,    max:6,   step:0.1,  get:()=>M.smokeSize,     set:v=>{M.smokeSize=v; if(pMat)pMat.size=v;} },
         { lbl:'smoke rate',  min:0,    max:300, step:5,    get:()=>M.smokeMaxRate,  set:v=>M.smokeMaxRate=v },
-        { lbl:'smoke fade',  min:0,    max:500, step:5,    get:()=>M.faceRadius,    set:v=>M.faceRadius=v },
-        { lbl:'tumble thresh',min:100, max:6000,step:25,   get:()=>M.tumbleThresh,  set:v=>M.tumbleThresh=v },
+        { lbl:'smoke fade',  min:0,    max:40,  step:0.5,  get:()=>M.faceRadius,    set:v=>M.faceRadius=v },
+        { lbl:'tumble thresh',min:10,  max:120, step:1,    get:()=>M.tumbleThresh,  set:v=>M.tumbleThresh=v },
         { lbl:'tumble time', min:0.2,  max:3,   step:0.1,  get:()=>M.tumbleTime,    set:v=>M.tumbleTime=v },
         { lbl:'tumble spin', min:0,    max:20,  step:0.5,  get:()=>M.tumbleSpin,    set:v=>M.tumbleSpin=v },
     ];
+    // atmosphere / weather — all applied live via applyAtmos()
+    // haze = aerial perspective: distant faces dissolve into sky.
+    // The single strongest "this thing is a mountain" cue we have.
+    // Sliders write to ATMOS_T (the target), never ATMOS — so nudging a
+    // dial mid-crossfade steers the fade instead of fighting it.
+    const ATMOS_SLIDERS = [
+        { lbl:'sun',        min:0, max:2,   step:0.05, get:()=>ATMOS_T.sun,      set:v=>ATMOS_T.sun=v },
+        { lbl:'sun height', min:-0.3,max:1.57,step:0.02,get:()=>ATMOS_T.sunEl,   set:v=>ATMOS_T.sunEl=v },
+        { lbl:'sun angle',  min:0, max:6.28,step:0.05, get:()=>ATMOS_T.sunAz,    set:v=>ATMOS_T.sunAz=v },
+        { lbl:'ambient',    min:0, max:1.5, step:0.05, get:()=>ATMOS_T.ambient,  set:v=>ATMOS_T.ambient=v },
+        { lbl:'haze',       min:0, max:1,   step:0.02, get:()=>ATMOS_T.haze,     set:v=>ATMOS_T.haze=v },
+        { lbl:'exposure',   min:0.2,max:2,  step:0.02, get:()=>ATMOS_T.exposure, set:v=>ATMOS_T.exposure=v },
+        { lbl:'weather',    min:0, max:1,   step:0.02, get:()=>ATMOS_T.wxAmount, set:v=>ATMOS_T.wxAmount=v },
+        { lbl:'mood fade',  min:0.1,max:15, step:0.1,  get:()=>moodFade,         set:v=>moodFade=v },
+    ];
 
+    // returns a resync fn: a mood change moves the targets, and the slider
+    // handles have to follow or the UI starts lying about the world
     function buildSliderColumn(containerId, defs){
         const host=document.getElementById(containerId);
+        const syncers=[];
         defs.forEach((def,i)=>{
             const row=document.createElement('div'); row.className='range-row';
             const lbl=document.createElement('div'); lbl.className='range-lbl';
@@ -722,21 +950,323 @@
                 valSpan.textContent=fmt(def.get());
             });
             row.appendChild(lbl); row.appendChild(inp); host.appendChild(row);
+            syncers.push(()=>{ inp.value=def.get(); valSpan.textContent=fmt(def.get()); });
         });
+        return ()=>syncers.forEach(f=>f());
+    }
+
+    // ── MOOD UI ───────────────────────────────────────────────────
+    let syncAtmosSliders=()=>{};
+    function buildMoodUI(){
+        const grid=document.getElementById('mood-grid');
+        for(const key in MOODS){
+            const b=document.createElement('button');
+            b.className='mood-btn'; b.dataset.mood=key; b.textContent=MOODS[key].lbl;
+            b.addEventListener('click',()=>setMood(key));
+            grid.appendChild(b);
+        }
+        // weather override — swap what's falling without touching the light
+        const row=document.getElementById('wx-row');
+        for(const t of ['none','rain','snow','mist','ash','ember']){
+            const b=document.createElement('button');
+            b.className='mood-btn'; b.dataset.wx=t; b.textContent=t;
+            b.addEventListener('click',()=>{
+                setWeather(t);
+                if(t!=='none'&&ATMOS_T.wxAmount<0.05){ ATMOS_T.wxAmount=0.8; syncAtmosSliders(); }
+                document.querySelectorAll('[data-wx]').forEach(x=>
+                    x.classList.toggle('active',x.dataset.wx===t));
+            });
+            row.appendChild(b);
+        }
     }
 
     // ── THREE SCENE ───────────────────────────────────────────────
     let scene, camera, renderer, controls;
     let instancedMesh, particleSystem, floorMesh;
     let walkCamera = null;
+    let ambient, hemiLight, keyLight, fillLight, dustMat;   // hoisted for live atmosphere
+
+    // ═══════════════════════════════════════════════════════════
+    // [ATMOS] MOOD ENGINE — every value below crossfades. Nothing
+    // ever snaps, because a mood arriving instantly reads as a bug;
+    // a mood arriving over four seconds reads as weather.
+    // ATMOS = what's on screen now · ATMOS_T = what it's heading toward.
+    // Sliders write to ATMOS_T, so tweaking mid-fade steers instead
+    // of fighting.
+    // ═══════════════════════════════════════════════════════════
+    const ATMOS = {
+        skyTop:new THREE.Color(0x4E7FB0), skyBot:new THREE.Color(0xA6CBE2),
+        fogCol:new THREE.Color(0x8FB4CE), sunCol:new THREE.Color(0xF2F4F2),
+        groundCol:new THREE.Color(0x3A3E42),
+        sun:0.7, ambient:0.85, haze:0.1, exposure:1,
+        sunEl:0.62, sunAz:0.7,      // radians — elevation, azimuth
+        wxAmount:0,                 // 0..1 weather density
+    };
+    const ATMOS_T = { ...ATMOS,
+        skyTop:ATMOS.skyTop.clone(), skyBot:ATMOS.skyBot.clone(),
+        fogCol:ATMOS.fogCol.clone(), sunCol:ATMOS.sunCol.clone(),
+        groundCol:ATMOS.groundCol.clone(),
+    };
+    let WX_TYPE='none';             // rain|snow|mist|ash|ember|none
+    let moodFade=4.0;               // seconds for a full crossfade
+    let currentMood='clear';
+
+    // ── MOODS ─────────────────────────────────────────────────────
+    // Each is a complete atmosphere: sky gradient, fog, sun angle +
+    // colour, exposure, and what's falling out of it.
+    const MOODS = {
+        clear:    { lbl:'clear',    wx:'none',  wxAmount:0,
+                    skyTop:0x4E7FB0, skyBot:0xA6CBE2, fogCol:0x8FB4CE, sunCol:0xF2F4F2,
+                    groundCol:0x3A3E42, sun:0.7, ambient:0.85, haze:0.1, exposure:1,
+                    sunEl:0.62, sunAz:0.7 },
+
+        dusk:     { lbl:'dusk',     wx:'none',  wxAmount:0,
+                    skyTop:0x1E2A5A, skyBot:0xE8845A, fogCol:0xC97A52, sunCol:0xFFB070,
+                    groundCol:0x2A2028, sun:0.85, ambient:0.4, haze:0.34, exposure:1.05,
+                    sunEl:0.06, sunAz:1.9 },
+
+        storm:    { lbl:'storm',    wx:'rain',  wxAmount:0.85,
+                    skyTop:0x1C2228, skyBot:0x515C64, fogCol:0x49545C, sunCol:0x8C9AA4,
+                    groundCol:0x1E2226, sun:0.22, ambient:0.5, haze:0.5, exposure:0.95,
+                    sunEl:0.35, sunAz:2.6 },
+
+        blizzard: { lbl:'blizzard', wx:'snow',  wxAmount:1,
+                    skyTop:0x93A3AE, skyBot:0xD8E2E8, fogCol:0xCEDAE2, sunCol:0xE8F0F4,
+                    groundCol:0x8A949C, sun:0.3, ambient:1.1, haze:0.78, exposure:1.1,
+                    sunEl:0.5, sunAz:0.4 },
+
+        ash:      { lbl:'ash',      wx:'ash',   wxAmount:0.8,
+                    skyTop:0x2A2320, skyBot:0x6E5A48, fogCol:0x5A4A3C, sunCol:0xC46A38,
+                    groundCol:0x241E1A, sun:0.5, ambient:0.34, haze:0.6, exposure:0.98,
+                    sunEl:0.16, sunAz:3.6 },
+
+        deep:     { lbl:'deep',     wx:'mist',  wxAmount:0.7,
+                    skyTop:0x03181C, skyBot:0x0E4A52, fogCol:0x0B3A44, sunCol:0x6ED0D8,
+                    groundCol:0x04181C, sun:0.4, ambient:0.42, haze:0.92, exposure:1.12,
+                    sunEl:1.3, sunAz:0.2 },
+
+        bloodmoon:{ lbl:'blood moon', wx:'ember', wxAmount:0.55,
+                    skyTop:0x0A0204, skyBot:0x4A0E14, fogCol:0x33080E, sunCol:0xFF4438,
+                    groundCol:0x14060A, sun:0.62, ambient:0.16, haze:0.44, exposure:1.15,
+                    sunEl:0.22, sunAz:4.5 },
+
+        void:     { lbl:'void',     wx:'none',  wxAmount:0,
+                    skyTop:0x000000, skyBot:0x07070A, fogCol:0x000000, sunCol:0xFFFFFF,
+                    groundCol:0x000000, sun:1.5, ambient:0.03, haze:0, exposure:1,
+                    sunEl:0.9, sunAz:1.2 },
+    };
+
+    function setMood(key){
+        const m=MOODS[key]; if(!m) return;
+        currentMood=key;
+        ATMOS_T.skyTop.setHex(m.skyTop);
+        ATMOS_T.skyBot.setHex(m.skyBot);
+        ATMOS_T.fogCol.setHex(m.fogCol);
+        ATMOS_T.sunCol.setHex(m.sunCol);
+        ATMOS_T.groundCol.setHex(m.groundCol);
+        for(const k of ['sun','ambient','haze','exposure','sunEl','sunAz','wxAmount'])
+            ATMOS_T[k]=m[k];
+        // type swaps immediately; density fades, so the old stuff thins out
+        // as the new stuff arrives instead of teleporting
+        setWeather(m.wx);
+        syncAtmosSliders();
+        document.querySelectorAll('.mood-btn').forEach(b=>
+            b.classList.toggle('active', b.dataset.mood===key));
+    }
+
+    // per-frame crossfade — exponential, so it's framerate-independent
+    function stepAtmos(dt){
+        const k=1-Math.exp(-dt/Math.max(0.05,moodFade/4));
+        for(const c of ['skyTop','skyBot','fogCol','sunCol','groundCol'])
+            ATMOS[c].lerp(ATMOS_T[c],k);
+        for(const n of ['sun','ambient','haze','exposure','sunEl','sunAz','wxAmount'])
+            ATMOS[n]+=(ATMOS_T[n]-ATMOS[n])*k;
+        applyAtmos();
+    }
+
+    function applyAtmos(){
+        if(!scene) return;
+        if(skyMat){
+            skyMat.uniforms.top.value.copy(ATMOS.skyTop);
+            skyMat.uniforms.bot.value.copy(ATMOS.skyBot);
+        }
+        if(scene.background) scene.background.copy(ATMOS.skyBot);
+        if(scene.fog){
+            scene.fog.color.copy(ATMOS.fogCol);
+            // haze 1.0 → visibility ≈ one third of the span; 0 → crystal air
+            scene.fog.density = ATMOS.haze * 2.5 / SPAN;
+        }
+        if(ambient)  ambient.intensity=ATMOS.ambient;
+        if(keyLight){
+            keyLight.intensity=ATMOS.sun;
+            keyLight.color.copy(ATMOS.sunCol);
+            const ce=Math.cos(ATMOS.sunEl), se=Math.sin(ATMOS.sunEl);
+            keyLight.position.set(Math.cos(ATMOS.sunAz)*ce*SPAN, se*SPAN, Math.sin(ATMOS.sunAz)*ce*SPAN);
+        }
+        if(hemiLight){ hemiLight.color.copy(ATMOS.skyBot); hemiLight.groundColor.copy(ATMOS.groundCol); }
+        if(fillLight) fillLight.color.copy(ATMOS.skyTop);
+        if(renderer) renderer.toneMappingExposure=ATMOS.exposure;
+        if(wxMat)   wxMat.opacity   = WX[WX_TYPE].opacity * ATMOS.wxAmount;
+        if(rainMat) rainMat.opacity = WX[WX_TYPE].opacity * ATMOS.wxAmount;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // [ATMOS] WEATHER — one particle box that follows you and wraps.
+    // The box is player-local and toroidal: a flake leaving the top
+    // reappears at the bottom, so a few thousand points cover an
+    // infinite storm. Rain gets LineSegments (streaks read as speed);
+    // everything else is Points.
+    // Positions are seeded from the R2 low-discrepancy sequence — no
+    // Math.random, so the same mood always builds the same storm.
+    // ═══════════════════════════════════════════════════════════
+    const WX = {
+        none:  { count:0,    fall:0,   drift:0,   size:0,   opacity:0,    col:0xFFFFFF, streak:0,    swirl:0 },
+        rain:  { count:2600, fall:62,  drift:2.5, size:0,   opacity:0.5,  col:0xAEC4D2, streak:0.09, swirl:0 },
+        snow:  { count:2400, fall:3.2, drift:1.6, size:2.6, opacity:0.85, col:0xFFFFFF, streak:0,    swirl:1.5 },
+        mist:  { count:1400, fall:-0.6,drift:0.5, size:9,   opacity:0.13, col:0xBFE4EC, streak:0,    swirl:0.4 },
+        ash:   { count:1800, fall:1.9, drift:1.2, size:2.2, opacity:0.5,  col:0x6E6258, streak:0,    swirl:1.1 },
+        ember: { count:900,  fall:-1.4,drift:0.9, size:2.4, opacity:0.9,  col:0xFF7A32, streak:0,    swirl:1.3 },
+    };
+    const WX_BOX = 120;             // metres — the local weather cell
+    let wxPoints=null, wxMat=null, wxGeo=null;
+    let rainLines=null, rainMat=null, rainGeo=null;
+    let wxSeed=null, wxPos=null, wxCount=0;
+
+    const R2A=0.7548776662466927, R2B=0.5698402909980532;
+    const fractw=x=>x-Math.floor(x);
+    const wxHash=(a,b)=>fractw(Math.sin(a*127.1+b*311.7)*43758.5453123);
+
+    function initWeather(){
+        const MAXP=2600;
+        wxPos=new Float32Array(MAXP*3);
+        wxSeed=new Float32Array(MAXP*2);
+        for(let i=1;i<=MAXP;i++){
+            wxSeed[(i-1)*2]  =wxHash(i,3.7);      // drift phase
+            wxSeed[(i-1)*2+1]=0.55+wxHash(i,9.1)*0.9;  // per-flake speed spread
+        }
+        wxGeo=new THREE.BufferGeometry();
+        wxGeo.setAttribute('position',new THREE.BufferAttribute(wxPos,3));
+        wxMat=new THREE.PointsMaterial({color:0xFFFFFF,size:2,transparent:true,opacity:0,
+            depthWrite:false,sizeAttenuation:true,blending:THREE.NormalBlending});
+        wxPoints=new THREE.Points(wxGeo,wxMat);
+        wxPoints.frustumCulled=false; wxPoints.renderOrder=2;
+        scene.add(wxPoints);
+
+        rainGeo=new THREE.BufferGeometry();
+        rainGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(MAXP*6),3));
+        rainMat=new THREE.LineBasicMaterial({color:0xAEC4D2,transparent:true,opacity:0,depthWrite:false});
+        rainLines=new THREE.LineSegments(rainGeo,rainMat);
+        rainLines.frustumCulled=false; rainLines.renderOrder=2;
+        scene.add(rainLines);
+
+        setWeather('none');
+    }
+
+    function setWeather(type){
+        if(!WX[type]) type='none';
+        WX_TYPE=type;
+        const w=WX[type];
+        wxCount=w.count;
+        const isRain=(type==='rain');
+        if(wxPoints){
+            wxPoints.visible=!isRain&&wxCount>0;
+            wxMat.color.setHex(w.col);
+            wxMat.size=w.size;
+            // embers glow, everything else just occludes
+            wxMat.blending=(type==='ember')?THREE.AdditiveBlending:THREE.NormalBlending;
+            wxMat.needsUpdate=true;
+        }
+        if(rainLines){
+            rainLines.visible=isRain&&wxCount>0;
+            rainMat.color.setHex(w.col);
+        }
+        // re-seed the cell so a new storm doesn't inherit the old layout
+        seedWeather();
+    }
+
+    function seedWeather(){
+        const cam=walkMode?walkCamera:camera;
+        const ox=cam?cam.position.x:0, oy=cam?cam.position.y:0, oz=cam?cam.position.z:0;
+        for(let i=1;i<=wxCount;i++){
+            const j=(i-1)*3;
+            wxPos[j]  =ox+(fractw(i*R2A)-0.5)*WX_BOX;
+            wxPos[j+1]=oy+(fractw(i*R2B)-0.5)*WX_BOX;
+            wxPos[j+2]=oz+(wxHash(i,1.3)-0.5)*WX_BOX;
+        }
+    }
+
+    function updateWeather(dt){
+        if(!wxPoints||wxCount===0||ATMOS.wxAmount<0.01) return;
+        const w=WX[WX_TYPE];
+        const cam=walkMode?walkCamera:camera;
+        if(!cam) return;
+        const ox=cam.position.x, oy=cam.position.y, oz=cam.position.z;
+        const H=WX_BOX*0.5;
+        const t=performance.now()*0.001;
+        const isRain=(WX_TYPE==='rain');
+        const rArr=isRain?rainGeo.attributes.position.array:null;
+
+        for(let i=0;i<wxCount;i++){
+            const j=i*3;
+            const ph=wxSeed[i*2], sp=wxSeed[i*2+1];
+
+            // fall + deterministic swirl (sine drift, no RNG)
+            wxPos[j+1]-=w.fall*sp*dt;
+            if(w.swirl>0){
+                wxPos[j]  +=Math.sin(t*0.6+ph*6.283)*w.swirl*dt;
+                wxPos[j+2]+=Math.cos(t*0.47+ph*6.283)*w.swirl*dt;
+            }
+            wxPos[j]  +=w.drift*dt*(ph-0.5)*2;
+
+            // toroidal wrap around the player — an endless local storm
+            let dx=wxPos[j]-ox, dy=wxPos[j+1]-oy, dz=wxPos[j+2]-oz;
+            if(dx> H)wxPos[j]-=WX_BOX;   else if(dx<-H)wxPos[j]+=WX_BOX;
+            if(dy> H)wxPos[j+1]-=WX_BOX; else if(dy<-H)wxPos[j+1]+=WX_BOX;
+            if(dz> H)wxPos[j+2]-=WX_BOX; else if(dz<-H)wxPos[j+2]+=WX_BOX;
+
+            if(isRain){
+                const k=i*6;
+                rArr[k]  =wxPos[j];   rArr[k+1]=wxPos[j+1];   rArr[k+2]=wxPos[j+2];
+                rArr[k+3]=wxPos[j];   rArr[k+4]=wxPos[j+1]+w.fall*sp*w.streak; rArr[k+5]=wxPos[j+2];
+            }
+        }
+
+        if(isRain){
+            rainGeo.attributes.position.needsUpdate=true;
+            rainGeo.setDrawRange(0,wxCount*2);
+        } else {
+            wxGeo.attributes.position.needsUpdate=true;
+            wxGeo.setDrawRange(0,wxCount);
+        }
+    }
+
+    // ── SKY DOME — gradient, follows the camera so it never clips ──
+    let skyMesh=null, skyMat=null;
+    function initSky(){
+        skyMat=new THREE.ShaderMaterial({
+            uniforms:{ top:{value:ATMOS.skyTop.clone()}, bot:{value:ATMOS.skyBot.clone()} },
+            vertexShader:'varying vec3 vP; void main(){ vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+            fragmentShader:'uniform vec3 top; uniform vec3 bot; varying vec3 vP;'+
+                'void main(){ float h=normalize(vP).y; float t=clamp((h+0.22)/1.22,0.0,1.0);'+
+                'gl_FragColor=vec4(mix(bot,top,pow(t,0.65)),1.0); }',
+            side:THREE.BackSide, depthWrite:false, fog:false
+        });
+        skyMesh=new THREE.Mesh(new THREE.SphereGeometry(CAMERA_FAR*0.42,24,16),skyMat);
+        skyMesh.frustumCulled=false; skyMesh.renderOrder=-1;
+        scene.add(skyMesh);
+    }
+
+    let hullMesh = null;
+    let hullMode = false;
 
     // ── ODM PLAYER STATE (Test_2 architecture) ────────────────────
     let walkMode = false;
     const player = {
-        pos:   new THREE.Vector3(0, 2, WORLD_HALF*0.75),
+        pos:   new THREE.Vector3(0, 1, SPAN*0.5),   // outside the monument edge, looking up at it
         vel:   new THREE.Vector3(),
         yaw:   0, pitch: 0, roll: 0,
         boostIntensity: 0,
+        grounded: false,
         tumble: 0,
         tumbleVel: new THREE.Vector3(),
     };
@@ -756,8 +1286,7 @@
             emit(player.pos.clone(),normal.clone().multiplyScalar(6+Math.random()*10),0.8);
     }
     let currentHFov = M.hFov;
-    const camTarget = new THREE.Vector3();
-    const grapple = { active:false, anchor:new THREE.Vector3(), line:null };
+    const grapple = { active:false, anchor:new THREE.Vector3(), line:null, len:0 };
     const stickL = { on:false, id:null, cx:0, cy:0, dx:0, dy:0 };
     const stickR = { on:false, id:null, cx:0, cy:0, dx:0, dy:0, momX:0, momY:0 };
     const aimRay = new THREE.Raycaster();
@@ -773,7 +1302,7 @@
 
     // ── MISC ──────────────────────────────────────────────────────
     const ctxs = {};
-    const loaded = { front:false, side:false, top:false };
+    const loaded = { front:false, side:false, top:false, bottom:false };
     let currentJobId = 0;
     let hudTick = 0;
 
@@ -787,6 +1316,7 @@
         modeStr:   document.getElementById('s-mode'),
         btnRot:    document.getElementById('btn-auto-rotate'),
         btnWalk:   document.getElementById('btn-walk-toggle'),
+        btnHull:   document.getElementById('btn-hull'),
         walkHUD:   document.getElementById('walk-hud'),
         crosshair: document.getElementById('walk-crosshair'),
         joyL:      document.getElementById('joyL'),
@@ -819,25 +1349,33 @@
     }
 
     // ═══════════════════════════════════════════════════════════
-    // [ODM] COLLISION — voxel world adapters
-    // sampleFloorY: highest voxel top under (wx,wz) at/below head level
+    // [COLLISION] — rebuilt from scratch. The old system had two
+    // fatal holes that were the clipping:
+    //   1. sampleFloorY only accepted a floor within 0.6u of your
+    //      head, so any fast landing sank past the gate and the
+    //      floor you'd just penetrated was REJECTED → fall-through.
+    //   2. No ceiling test at all — flying into any underside put
+    //      you inside the geometry, and the horizontal push-out
+    //      then ejected you sideways by up to half a block.
+    // New model: swept, substepped, per-axis AABB resolution
+    // (move Y → resolve Y, move X → resolve X, move Z → resolve Z).
+    // No step outruns a fraction of the smallest leaf, so nothing
+    // tunnels at ANY slider speed, and every face — top, side,
+    // underside — is solid. Broadphase hash cells are sized to the
+    // smallest leaf; big merged octree nodes just occupy more cells
+    // (paid once per build, queries stay tiny).
     // ═══════════════════════════════════════════════════════════
-    // ═══════════════════════════════════════════════════════════
-    // [COLLISION] broadphase — a spatial hash over the voxel field.
-    // Rebuilt only when the octree changes (rebuildVoxelHash), so
-    // per-frame queries touch a handful of nearby leaves instead of
-    // scanning thousands. This is the fix for the standing jitter and
-    // the frame stutter, and it scales cleanly with the 10x world.
-    // ═══════════════════════════════════════════════════════════
-    let voxHash=null, voxCell=0;
+    let voxHash=null, voxCell=20, minLeaf=SPAN/64;
+    let _seenArr=new Uint32Array(0), _stamp=0;
     function rebuildVoxelHash(){
         voxHash=new Map();
         if(!instancedMesh||instancedMesh.count===0)return;
         const mArr=instancedMesh.instanceMatrix.array, count=instancedMesh.count;
-        // cell ≈ largest leaf so any box spans at most ~2 cells per axis
-        let maxHalf=0;
-        for(let i=0;i<count;i++){const h=mArr[i*16]/2; if(h>maxHalf)maxHalf=h;}
-        voxCell=Math.max(1,maxHalf*2);
+        _seenArr=new Uint32Array(count); _stamp=0;
+        minLeaf=Infinity;
+        for(let i=0;i<count;i++){const s=mArr[i*16]; if(s<minLeaf)minLeaf=s;}
+        if(!isFinite(minLeaf)||minLeaf<=0)minLeaf=SPAN/CFG.resolution;
+        voxCell=Math.max(minLeaf, SPAN/256);
         for(let i=0;i<count;i++){
             const idx=i*16, half=mArr[idx]/2;
             const bx=mArr[idx+12], bz=mArr[idx+14];
@@ -850,68 +1388,117 @@
             }
         }
     }
-    // iterate candidate voxel indices near (wx,wz) → callback(idx)
-    function forNearbyVoxels(wx,wz,fn){
+    // visit each voxel whose cells overlap the XZ rect exactly once
+    function forVoxelsInRect(x0,x1,z0,z1,fn){
         if(!voxHash)return;
-        const cx=Math.floor(wx/voxCell), cz=Math.floor(wz/voxCell);
-        for(let ix=cx-1;ix<=cx+1;ix++)for(let iz=cz-1;iz<=cz+1;iz++){
-            const arr=voxHash.get(ix+','+iz);
-            if(arr)for(let k=0;k<arr.length;k++)fn(arr[k]);
+        _stamp++;
+        const cx0=Math.floor(x0/voxCell), cx1=Math.floor(x1/voxCell);
+        const cz0=Math.floor(z0/voxCell), cz1=Math.floor(z1/voxCell);
+        for(let cx=cx0;cx<=cx1;cx++)for(let cz=cz0;cz<=cz1;cz++){
+            const arr=voxHash.get(cx+','+cz); if(!arr)continue;
+            for(let k=0;k<arr.length;k++){
+                const i=arr[k];
+                if(_seenArr[i]===_stamp)continue;
+                _seenArr[i]=_stamp;
+                fn(i);
+            }
         }
     }
 
-    // vertical: highest voxel top under (wx,wz) at/below head — owns landing
-    function sampleFloorY(wx, wz, headY){
+    // highest voxel top at/below yRef under the body footprint —
+    // HUD altitude + spawn placement only; landing is owned by
+    // resolveAxis now, so there's no head-gate to reject a floor.
+    function sampleGroundBelow(wx, wz, yRef){
         let best = WORLD_FLOOR;
         if(instancedMesh && instancedMesh.count>0 && voxHash){
-            const mArr = instancedMesh.instanceMatrix.array;
-            const R=M.radius;
-            forNearbyVoxels(wx,wz,(i)=>{
+            const mArr = instancedMesh.instanceMatrix.array, R=M.radius;
+            forVoxelsInRect(wx-R,wx+R,wz-R,wz+R,(i)=>{
                 const idx=i*16, half=mArr[idx]/2;
                 const bx=mArr[idx+12], by=mArr[idx+13], bz=mArr[idx+14];
-                if(Math.abs(wx-bx)<=half+R && Math.abs(wz-bz)<=half+R){
-                    const top=by+half;
-                    if(top>best && top<=headY+M.height*0.3) best=top;
-                }
+                if(Math.abs(wx-bx)>half+R || Math.abs(wz-bz)>half+R) return;
+                const top=by+half;
+                if(top>best && top<=yRef+0.05) best=top;
             });
         }
         return best;
     }
 
-    // horizontal-only wall push-out. Vertical (landing) is owned by the
-    // floor clamp, so adjacent overlapping leaves can't flip up-vs-side
-    // and vibrate. Only pushes on X/Z, and only when the body is clearly
-    // beside a block (not sitting on it). Fast via broadphase.
-    function voxelPushOut(){
-        if(!instancedMesh || instancedMesh.count===0 || !voxHash) return;
-        const mArr=instancedMesh.instanceMatrix.array;
-        const R=M.radius;
-        const bodyBottom=player.pos.y-M.height, bodyTop=player.pos.y+M.height*0.5;
-        // resting height: if we're standing on the surface here, don't wall-push
-        const restTop=sampleFloorY(player.pos.x,player.pos.z,player.pos.y);
-        forNearbyVoxels(player.pos.x,player.pos.z,(i)=>{
+    // resolve player AABB vs voxel AABBs along ONE axis.
+    // axis: 0=X 1=Y 2=Z. Substeps are small enough that the box
+    // midplane test always picks the face we actually came through.
+    function resolveAxis(mArr, axis){
+        const R=M.radius, H=M.height;
+        forVoxelsInRect(player.pos.x-R,player.pos.x+R,player.pos.z-R,player.pos.z+R,(i)=>{
             const idx=i*16, half=mArr[idx]/2;
             const bx=mArr[idx+12], by=mArr[idx+13], bz=mArr[idx+14];
-            const top=by+half, bottom=by-half;
-            // ignore blocks we're standing on top of (feet at/above their top)
-            if(bodyBottom>=top-Math.max(0.5,M.height*0.1)) return;
-            if(bodyTop<bottom) return;
-            const dx=player.pos.x-bx, dz=player.pos.z-bz;
-            const hw=half+R, hd=half+R;
-            if(Math.abs(dx)>hw||Math.abs(dz)>hd) return;
-            const ox=hw-Math.abs(dx), oz=hd-Math.abs(dz);
-            if(ox<oz){
+            const ox=(half+R)-Math.abs(player.pos.x-bx); if(ox<=0)return;
+            const oy=(half+H)-Math.abs(player.pos.y-by); if(oy<=0)return;
+            const oz=(half+R)-Math.abs(player.pos.z-bz); if(oz<=0)return;
+            if(axis===1){
+                if(player.pos.y>=by){                       // landing on a top face
+                    const vImpact=-player.vel.y;
+                    player.pos.y+=oy;
+                    if(player.vel.y<0){
+                        player.vel.y=0; player.grounded=true;
+                        if(vImpact>M.tumbleThresh*1.2)startTumble(vImpact,_bv.set(0,1,0));
+                    }
+                } else {                                     // head into an underside
+                    player.pos.y-=oy;
+                    if(player.vel.y>0)player.vel.y=0;
+                }
+            } else if(axis===0){
                 const vImpact=Math.abs(player.vel.x);
-                player.pos.x += dx<0?-ox:ox;
-                if(vImpact>M.tumbleThresh){startTumble(vImpact,_bv.set(Math.sign(dx),0,0));player.vel.x=-player.vel.x*0.3;}
+                player.pos.x+=(player.pos.x>=bx?ox:-ox);
+                if(vImpact>M.tumbleThresh){startTumble(vImpact,_bv.set(Math.sign(player.pos.x-bx),0,0));player.vel.x=-player.vel.x*0.3;}
                 else player.vel.x=0;
             } else {
                 const vImpact=Math.abs(player.vel.z);
-                player.pos.z += dz<0?-oz:oz;
-                if(vImpact>M.tumbleThresh){startTumble(vImpact,_bv.set(0,0,Math.sign(dz)));player.vel.z=-player.vel.z*0.3;}
+                player.pos.z+=(player.pos.z>=bz?oz:-oz);
+                if(vImpact>M.tumbleThresh){startTumble(vImpact,_bv.set(0,0,Math.sign(player.pos.z-bz)));player.vel.z=-player.vel.z*0.3;}
                 else player.vel.z=0;
             }
         });
+    }
+
+    // swept movement: substep so no single step exceeds ~40% of the
+    // body width or the smallest leaf — tunneling becomes impossible
+    // even with max speed / hook pull sliders pinned.
+    function moveAndCollide(dt){
+        player.grounded=false;
+        const speed=player.vel.length();
+        const maxStep=Math.max(0.05, 0.4*Math.min(M.radius*2, minLeaf));
+        let n=Math.ceil((speed*dt)/maxStep);
+        n=Math.max(1,Math.min(48,n));
+        const h=dt/n;
+        const mArr=(instancedMesh&&instancedMesh.count>0&&voxHash)?instancedMesh.instanceMatrix.array:null;
+        for(let s=0;s<n;s++){
+            // Y
+            player.pos.y+=player.vel.y*h;
+            if(player.pos.y-M.height<WORLD_FLOOR){          // world ground plane
+                const vImpact=-player.vel.y;
+                player.pos.y=WORLD_FLOOR+M.height;
+                if(player.vel.y<0){
+                    player.vel.y=0; player.grounded=true;
+                    if(vImpact>M.tumbleThresh*1.2)startTumble(vImpact,_bv.set(0,1,0));
+                }
+            }
+            if(mArr)resolveAxis(mArr,1);
+            // X
+            player.pos.x+=player.vel.x*h;
+            player.pos.x=clamp(player.pos.x,-BOUND,BOUND);
+            if(mArr)resolveAxis(mArr,0);
+            // Z
+            player.pos.z+=player.vel.z*h;
+            player.pos.z=clamp(player.pos.z,-BOUND,BOUND);
+            if(mArr)resolveAxis(mArr,2);
+        }
+        // contact probe: grounded = feet touching a surface, not
+        // "we happened to push up this frame" — keeps friction and
+        // ground-accel selection honest when vel.y is exactly 0
+        if(!player.grounded){
+            const feet=player.pos.y-M.height;
+            if(feet-sampleGroundBelow(player.pos.x,player.pos.z,feet)<0.02)player.grounded=true;
+        }
     }
     const _bv=new THREE.Vector3();
 
@@ -950,6 +1537,7 @@
 
     function releaseGrapple(){
         grapple.active=false;
+        grapple.len=0;
         if(grapple.line){
             scene.remove(grapple.line);
             grapple.line.geometry.dispose();
@@ -1083,16 +1671,52 @@
         let mx=0,mz=0;
         if(stickL.on){mx=stickL.dx;mz=stickL.dy;}
         const mv=new THREE.Vector3(mx,0,mz);
+        const stickMag=Math.min(1,mv.length());
         if(mv.lengthSq()>1)mv.normalize();
         mv.applyAxisAngle(new THREE.Vector3(0,1,0),player.yaw);
 
-        // terrain + state
-        const terrY=sampleFloorY(player.pos.x,player.pos.z,player.pos.y);
-        const ground=player.pos.y<=terrY+M.height+0.05;
+        // terrain + state — grounded comes from last frame's collision pass
+        const ground=player.grounded;
         const accel=(ground?M.accelGround:M.accelAir)*ctl;
 
         player.vel.x+=mv.x*accel*dt;
         player.vel.z+=mv.z*accel*dt;
+
+        // ── TURN AUTHORITY — steer, don't shove ───────────────────
+        // Rotate the horizontal velocity toward the stick at a fixed rad/s,
+        // preserving speed. Accel alone can never turn a fast vector in time;
+        // this is the difference between flying and being flung.
+        if(stickMag>0.05&&M.turnAuthority>0){
+            const hs=Math.hypot(player.vel.x,player.vel.z);
+            if(hs>0.5){
+                const cur=Math.atan2(player.vel.z,player.vel.x);
+                const want=Math.atan2(mv.z,mv.x);
+                const d=Math.atan2(Math.sin(want-cur),Math.cos(want-cur));
+                const rate=M.turnAuthority*stickMag*ctl*(ground?1:M.airTurnScale);
+                const turn=clamp(d,-rate*dt,rate*dt);
+                const na=cur+turn;
+                player.vel.x=Math.cos(na)*hs;
+                player.vel.z=Math.sin(na)*hs;
+            }
+        }
+
+        // ── BRAKE — pull against your heading to actually stop ─────
+        // No new button: opposing your own velocity bleeds speed hard.
+        // Drag alone (0.085) can't arrest anything, which is most of why
+        // there was never a sense of authority.
+        if(stickMag>0.05&&M.brakeAccel>0&&!tumbling){
+            const hs=Math.hypot(player.vel.x,player.vel.z);
+            if(hs>0.5){
+                const align=(mv.x*player.vel.x+mv.z*player.vel.z)/hs;
+                if(align<-M.brakeCone){
+                    const bleed=M.brakeAccel*stickMag*(-align)*dt;
+                    const ns=Math.max(0,hs-bleed);
+                    const k=ns/hs;
+                    player.vel.x*=k; player.vel.z*=k;
+                    player.vel.y*=Math.exp(-M.brakeVertical*dt);
+                }
+            }
+        }
 
         // roll from side speed (separated, stable)
         const forward=new THREE.Vector3(-Math.sin(player.yaw),0,-Math.cos(player.yaw));
@@ -1100,7 +1724,8 @@
         const horizontalVel=new THREE.Vector3(player.vel.x,0,player.vel.z);
         const sideSpeed=horizontalVel.dot(right);
         const targetRoll=THREE.MathUtils.clamp(sideSpeed*M.rollScale,-M.rollMax,M.rollMax);
-        player.roll=THREE.MathUtils.lerp(player.roll,targetRoll,0.08);
+        // dt-corrected: a raw 0.08 lerp leans twice as fast at 120fps as at 60
+        player.roll=THREE.MathUtils.lerp(player.roll,targetRoll,1-Math.pow(1-M.rollRate,dt*60));
 
         // gas boost — forward cone on left stick (boostCone is a FLOAT 0–1)
         player.boostIntensity=0;
@@ -1115,11 +1740,24 @@
         }
         DOM.knobL.classList.toggle('boost',player.boostIntensity>0.05);
 
-        // grapple pull (pull ∝ dist/ropeNorm)
+        // grapple pull (pull ∝ dist/ropeNorm, ramp CAPPED at 3x —
+        // uncapped, a long rope multiplied hookPull by hundreds and
+        // single-frame velocity spikes punched through geometry)
         if(grapple.active){
             const toA=new THREE.Vector3().subVectors(grapple.anchor,player.pos);
             const dist=toA.length(); toA.normalize();
-            player.vel.addScaledVector(toA,M.hookPull*(dist/M.ropeNorm)*dt);
+            const ramp=Math.min(dist/M.ropeNorm,3);
+            player.vel.addScaledVector(toA,M.hookPull*ramp*dt);
+
+            // ── WINCH — the rope only ever shortens, and once taut it
+            // refuses to stretch: the receding velocity component gets
+            // removed. A spring suggests where you'll go; a rope decides.
+            if(grapple.len<=0||dist<grapple.len)grapple.len=dist;
+            if(M.reelRate>0)grapple.len=Math.max(2,grapple.len-M.reelRate*dt);
+            if(M.ropeStiff>0&&dist>grapple.len){
+                const closing=player.vel.dot(toA);      // <0 = moving away
+                if(closing<0)player.vel.addScaledVector(toA,-closing*M.ropeStiff);
+            }
             updateRope();
         }
 
@@ -1132,31 +1770,20 @@
         const spd=player.vel.length();
         if(spd>M.maxSpeed)player.vel.multiplyScalar(M.maxSpeed/spd);
 
-        // integrate
-        player.pos.addScaledVector(player.vel,dt);
+        // swept move + solid collision (floors, walls, ceilings —
+        // substepped so nothing tunnels at any slider setting)
+        moveAndCollide(dt);
 
-        // world bounds
-        player.pos.x=clamp(player.pos.x,-BOUND,BOUND);
-        player.pos.z=clamp(player.pos.z,-BOUND,BOUND);
-
-        // voxel side collision
-        voxelPushOut();
-
-        // floor collision + hard-landing fumble
-        const floorY=sampleFloorY(player.pos.x,player.pos.z,player.pos.y)+M.height;
-        if(player.pos.y<=floorY){
-            const vImpact=-player.vel.y;
-            player.pos.y=floorY;
-            player.vel.y=0;
-            if(vImpact>M.tumbleThresh*1.4)startTumble(vImpact,_bv.set(0,1,0));
+        // ground friction once the collision pass confirms contact
+        if(player.grounded){
             player.vel.x*=Math.exp(-M.groundFric*dt);
             player.vel.z*=Math.exp(-M.groundFric*dt);
         }
 
-        // smoothed camera with eye offset (neck pivot) — camLag is a DECIMAL
-        const eyePos=player.pos.clone().add(new THREE.Vector3(0,M.eyeOffset,0));
-        camTarget.lerp(eyePos,M.camLag);
-        walkCamera.position.copy(camTarget);
+        // camera welded to the head — NO smoothing. A lerped follow-cam
+        // lags the model, so the physics can be perfect and it still feels
+        // mushy: every input arrives late by the length of the lerp.
+        walkCamera.position.set(player.pos.x,player.pos.y+M.eyeOffset,player.pos.z);
 
         // tumble spin decays; camera inherits the spin
         if(tumbling){
@@ -1177,17 +1804,22 @@
         walkCamera.rotation.z=-player.roll;
 
         // right stick look + momentum on release (locked while tumbling)
+        // dt-scaled: this was applied PER FRAME, so look speed rode on
+        // framerate — the same flick turned twice as far at 120fps as at 60,
+        // and drifted every time the frame budget wobbled. Nothing feels
+        // less "in control" than a camera whose gain changes under load.
+        const look=M.stickSens*dt*60;
         if(stickR.on&&!tumbling){
-            player.yaw  -=stickR.dx*M.stickSens;
-            player.pitch-=stickR.dy*M.stickSens;
+            player.yaw  -=stickR.dx*look;
+            player.pitch-=stickR.dy*look;
             player.pitch=Math.max(-PI_2,Math.min(PI_2,player.pitch));
         } else if(!tumbling){
             const m=Math.abs(stickR.momX)+Math.abs(stickR.momY);
             if(m>0.0005){
                 const fd=Math.exp(-M.groundFric*dt);
                 stickR.momX*=fd; stickR.momY*=fd;
-                player.yaw  -=stickR.momX*M.stickSens;
-                player.pitch-=stickR.momY*M.stickSens;
+                player.yaw  -=stickR.momX*look;
+                player.pitch-=stickR.momY*look;
                 player.pitch=Math.max(-PI_2,Math.min(PI_2,player.pitch));
             } else {stickR.momX=0;stickR.momY=0;}
         }
@@ -1195,18 +1827,19 @@
         // FOV breathe — horizontal FOV, consistent portrait & landscape
         const targetHFov=M.hFov+Math.min(M.hFovMax-M.hFov,spd*(M.hFovMax-M.hFov)/M.maxSpeed*1.4);
         const fovRate=currentHFov<targetHFov?M.fovExpandRate:M.fovRecoverRate;
-        currentHFov+=(targetHFov-currentHFov)*fovRate;
+        currentHFov+=(targetHFov-currentHFov)*(1-Math.pow(1-Math.min(0.999,fovRate),dt*60));
         setHFov(currentHFov);
 
-        // HUD (throttled)
+        // HUD (throttled) — alt = feet height above whatever is below them
         hudTick++;
         if(hudTick%8===0){
-            const alt=player.pos.y-(sampleFloorY(player.pos.x,player.pos.z,player.pos.y)+M.height);
+            const feet=player.pos.y-M.height;
+            const alt=feet-sampleGroundBelow(player.pos.x,player.pos.z,feet+0.1);
             DOM.whPos.textContent=`${player.pos.x.toFixed(0)},${player.pos.y.toFixed(0)},${player.pos.z.toFixed(0)}`;
             DOM.whSpd.textContent=spd.toFixed(1);
             DOM.whAlt.textContent=alt.toFixed(1);
             DOM.whStatus.textContent=
-                tumbling?'!! tumbling !!':player.boostIntensity>0.05?'boost':grapple.active?'anchored':ground?'grounded':'air';
+                tumbling?'!! tumbling !!':player.boostIntensity>0.05?'boost':grapple.active?'anchored':player.grounded?'grounded':'air';
         }
 
         if(hudTick%3===0)scanHit();   // throttled: full instanced raycast is heavy
@@ -1301,10 +1934,13 @@
 
     // ── SPAWN / MODE ──────────────────────────────────────────────
     function spawnPlayer(){
-        player.pos.set(0, M.height+1, WORLD_HALF*0.75);
+        // 160u back from the monument's edge, feet on the ground —
+        // it should fill the sky the moment wander mode kicks in
+        player.pos.set(0, WORLD_FLOOR+M.height+0.05, SPAN*0.7);
         player.vel.set(0,0,0);
+        player.grounded=false;
         player.yaw=0; player.pitch=0; player.roll=0;
-        camTarget.copy(player.pos).add(new THREE.Vector3(0,M.eyeOffset,0));
+        walkCamera.position.set(player.pos.x,player.pos.y+M.eyeOffset,player.pos.z);
         player.tumble=0; player.tumbleVel.set(0,0,0);
         const fx=document.getElementById('tumble-fx'); if(fx)fx.classList.remove('on');
         releaseGrapple();
@@ -1375,6 +2011,7 @@
                 instancedMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
                 instancedMesh.count=msg.matrices.length/16;
                 rebuildVoxelHash();
+                if(hullMode) buildHullFromVoxels();
                 if(s)s.innerText='q u i e t';
             } else {
                 if(instancedMesh)instancedMesh.count=0;
@@ -1382,16 +2019,76 @@
             }
             if(DOM.vox)DOM.vox.innerText=msg.activeCount.toLocaleString();
             if(DOM.grid)DOM.grid.innerText=`${CFG.resolution}³`;
-            if(DOM.views)DOM.views.innerText=`${+loaded.front+ +loaded.side+ +loaded.top}/3`;
+            if(DOM.views)DOM.views.innerText=`${+loaded.front+ +loaded.side+ +loaded.top+ +loaded.bottom}/4`;
             if(DOM.buildTime)DOM.buildTime.innerText=`${msg.time.toFixed(0)}ms`;
         }
     };
+
+    // ── CONVEX HULL ───────────────────────────────────────────────
+    function buildHullFromVoxels(){
+        if(!instancedMesh || instancedMesh.count === 0) return;
+        // sample voxel centers from the instanced matrix array
+        const mArr = instancedMesh.instanceMatrix.array;
+        const count = instancedMesh.count;
+        const pts = [];
+        // sample every voxel center (col 12,13,14 of each 4x4 matrix)
+        for(let i = 0; i < count; i++){
+            const b = i * 16;
+            pts.push(new THREE.Vector3(mArr[b+12], mArr[b+13], mArr[b+14]));
+        }
+        if(pts.length < 4){ showToast('. . . not enough voxels . . .'); return; }
+
+        // THREE r128 ConvexHull lives in examples — we inline a minimal
+        // gift-wrapping is complex so use THREE.ConvexGeometry if available,
+        // otherwise fall back to a bounding-box cage so it always works.
+        let geo;
+        if(THREE.ConvexGeometry){
+            geo = new THREE.ConvexGeometry(pts);
+        } else {
+            // fallback: compute tight bounding box and make a scaled box
+            const box = new THREE.Box3();
+            pts.forEach(p => box.expandByPoint(p));
+            const sz = new THREE.Vector3(); box.getSize(sz);
+            const ctr = new THREE.Vector3(); box.getCenter(ctr);
+            geo = new THREE.BoxGeometry(sz.x, sz.y, sz.z);
+            geo.translate(ctr.x, ctr.y, ctr.z);
+        }
+
+        if(hullMesh){ scene.remove(hullMesh); hullMesh.geometry.dispose(); hullMesh.material.dispose(); hullMesh = null; }
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0xB8DDEF,
+            roughness: 0.3,
+            metalness: 0.5,
+            flatShading: true,
+            wireframe: false,
+            transparent: true,
+            opacity: 0.72,
+            side: THREE.DoubleSide,
+        });
+        hullMesh = new THREE.Mesh(geo, mat);
+        scene.add(hullMesh);
+    }
+
+    function setHullMode(on){
+        hullMode = on;
+        if(on){
+            buildHullFromVoxels();
+            if(instancedMesh) instancedMesh.visible = false;
+            DOM.btnHull.classList.add('active');
+            showToast('. . . h u l l . . .');
+        } else {
+            if(hullMesh){ scene.remove(hullMesh); hullMesh.geometry.dispose(); hullMesh.material.dispose(); hullMesh = null; }
+            if(instancedMesh) instancedMesh.visible = true;
+            DOM.btnHull.classList.remove('active');
+            showToast('. . . v o x e l s . . .');
+        }
+    }
 
     // ── IMAGE PIPELINE ────────────────────────────────────────────
     const IMG_SIZE=128;
 
     function generateFallbacks(){
-        [ctxs.front,ctxs.side,ctxs.top].forEach(ctx=>{
+        [ctxs.front,ctxs.side,ctxs.top,ctxs.bottom].forEach(ctx=>{
             ctx.canvas.width=IMG_SIZE;ctx.canvas.height=IMG_SIZE;
             ctx.fillStyle='#1A1C1B';ctx.fillRect(0,0,IMG_SIZE,IMG_SIZE);
             ctx.fillStyle='#41688E';const m=IMG_SIZE*0.25;
@@ -1421,55 +2118,63 @@
     function init(){
         const cc=document.getElementById('canvas-container');
         scene=new THREE.Scene();
-        scene.background=new THREE.Color(0x1A1C1B);
-        scene.fog=new THREE.Fog(0x1A1C1B, CAMERA_FAR*0.6, CAMERA_FAR);
+        scene.background=new THREE.Color(0x7FA8C6);                 // clear blue (atmos overrides)
+        // exp fog = aerial perspective; density driven live by the haze slider
+        scene.fog=new THREE.FogExp2(0x7FA8C6, ATMOS.haze*3.5/SPAN);
 
-        camera=new THREE.PerspectiveCamera(70,cc.clientWidth/cc.clientHeight,1,CAMERA_FAR);
-        camera.position.set(WORLD_HALF*0.9, WORLD_HALF*0.55, WORLD_HALF*0.9);
+        camera=new THREE.PerspectiveCamera(70,cc.clientWidth/cc.clientHeight,0.5,CAMERA_FAR);
+        camera.position.set(SPAN*0.95, SPAN*0.55, SPAN*0.95);
 
         renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance',preserveDrawingBuffer:true});
         renderer.setSize(cc.clientWidth,cc.clientHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
         renderer.outputEncoding=THREE.sRGBEncoding;
+        // Linear @ exposure 1.0 is an identity pass — it only exists so the
+        // mood engine has an exposure dial that doesn't recolour anything.
+        renderer.toneMapping=THREE.LinearToneMapping;
+        renderer.toneMappingExposure=ATMOS.exposure;
         cc.appendChild(renderer.domElement);
 
         controls=new THREE.OrbitControls(camera,renderer.domElement);
         controls.enableDamping=true;controls.dampingFactor=0.03;
         controls.screenSpacePanning=true;
-        controls.target.set(0,WORLD_HALF*0.5,0);
+        controls.target.set(0,SPAN*0.3,0);
 
         // ODM walk camera — rotation applied directly (YXZ), no rig
-        walkCamera=new THREE.PerspectiveCamera(75,cc.clientWidth/cc.clientHeight,1,CAMERA_FAR);
+        // near 0.1: at body scale, near=1 clipped geometry off your face
+        walkCamera=new THREE.PerspectiveCamera(75,cc.clientWidth/cc.clientHeight,0.1,CAMERA_FAR);
         walkCamera.rotation.order='YXZ';
         scene.add(walkCamera);
 
-        // Lighting
-        scene.add(new THREE.AmbientLight(0xffffff,0.65));
-        const hemi=new THREE.HemisphereLight(0x99CADE,0x1A1C1B,0.5);
-        scene.add(hemi);
-        const dl=new THREE.DirectionalLight(0xffffff,0.7);
-        dl.position.set(300,3200,300);
-        scene.add(dl);
-        const fill=new THREE.DirectionalLight(0x334455,0.5);
-        fill.position.set(-200,-300,-200);
-        scene.add(fill);
+        // Lighting — soft cool daylight (refs hoisted for live atmos control)
+        ambient=new THREE.AmbientLight(0xEAF0F4,ATMOS.ambient); scene.add(ambient);
+        hemiLight=new THREE.HemisphereLight(0xC9D6DE,0x3A3E42,0.4); scene.add(hemiLight);
+        keyLight=new THREE.DirectionalLight(0xF2F4F2,ATMOS.sun);   // neutral daylight sun
+        keyLight.position.set(0.35*SPAN,0.9*SPAN,0.28*SPAN); scene.add(keyLight);
+        fillLight=new THREE.DirectionalLight(0x9FB2C0,0.2);        // faint cool sky-fill
+        fillLight.position.set(-0.3*SPAN,0.2*SPAN,-0.35*SPAN); scene.add(fillLight);
 
-        // Grid
-        const grid=new THREE.GridHelper(SPAN*2.2,60,0x41688E,0x2A2E2C);
-        grid.position.y=WORLD_FLOOR; scene.add(grid);
-
-        // Floor plane (grapple-able)
-        const floorMat=new THREE.MeshStandardMaterial({color:0x2A2E2C,roughness:0.9,metalness:0.15,transparent:true,opacity:1,depthWrite:false});
+        // Floor plane (grapple-able) — dark gray, fully matte (no metal/gloss glare)
+        const floorMat=new THREE.MeshStandardMaterial({color:0x4E4C39,roughness:1,metalness:0});
         floorMesh=new THREE.Mesh(new THREE.PlaneGeometry(SPAN*4,SPAN*4),floorMat);
-        floorMesh.rotation.x=-Math.PI/2;floorMesh.position.y=WORLD_FLOOR;
+        floorMesh.rotation.x=-Math.PI/2;floorMesh.position.y=WORLD_FLOOR-0.05;   // 5cm under voxel bottoms: no z-fight, no visible pit
         scene.add(floorMesh);
 
-        // Ambient dust particles
-        const pCount=3000,pPos=new Float32Array(pCount*3);
-        for(let i=0;i<pCount;i++){pPos[i*3]=(Math.random()-.5)*SPAN;pPos[i*3+1]=Math.random()*SPAN*0.45;pPos[i*3+2]=(Math.random()-.5)*SPAN;}
+        // Grid — REMOVED. It z-fought the floor no matter the offset; the matte
+        // floor reads fine on its own and collision/perf never used it.
+
+        // Ambient dust motes — subtle, screen-constant, cool pale (not a sandstorm)
+        const pCount=1200,pPos=new Float32Array(pCount*3);
+        for(let i=0;i<pCount;i++){pPos[i*3]=(Math.random()-.5)*SPAN;pPos[i*3+1]=Math.random()*SPAN*0.5;pPos[i*3+2]=(Math.random()-.5)*SPAN;}
         const dustGeo=new THREE.BufferGeometry();dustGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
-        particleSystem=new THREE.Points(dustGeo,new THREE.PointsMaterial({color:0x99CADE,size:40,transparent:true,opacity:0.04,blending:THREE.AdditiveBlending,depthWrite:false}));
+        dustMat=new THREE.PointsMaterial({color:0xD8DEE2,size:2,transparent:true,opacity:0.22,depthWrite:false,sizeAttenuation:false});
+        particleSystem=new THREE.Points(dustGeo,dustMat);
+        particleSystem.frustumCulled=false;
         scene.add(particleSystem);
+
+        initSky();
+        initWeather();
+        applyAtmos();
 
         // ODM smoke trail system
         initSmoke();
@@ -1478,8 +2183,9 @@
         ctxs.front=document.getElementById('canv-front').getContext('2d',{willReadFrequently:true});
         ctxs.side =document.getElementById('canv-side').getContext('2d',{willReadFrequently:true});
         ctxs.top  =document.getElementById('canv-top').getContext('2d',{willReadFrequently:true});
+        ctxs.bottom=document.getElementById('canv-bottom').getContext('2d',{willReadFrequently:true});
         generateFallbacks();
-        updateWorkerImage('front');updateWorkerImage('side');updateWorkerImage('top');
+        updateWorkerImage('front');updateWorkerImage('side');updateWorkerImage('top');updateWorkerImage('bottom');
         requestBuild();
 
         // Events
@@ -1488,6 +2194,10 @@
         setupUI();
         buildSliderColumn('move-sliders',MOVE_SLIDERS);
         buildSliderColumn('cam-sliders',CAM_SLIDERS);
+        buildMoodUI();
+        syncAtmosSliders=buildSliderColumn('atmos-sliders',ATMOS_SLIDERS);
+        setMood('clear');
+        document.querySelector('[data-wx="none"]').classList.add('active');
 
         document.addEventListener('touchstart',onTouchStart,{passive:false});
         document.addEventListener('touchmove', onTouchMove, {passive:false});
@@ -1504,23 +2214,42 @@
     }
 
     // ── DRAG/DROP ─────────────────────────────────────────────────
+    const VIEW_ORDER = ['front','side','top','bottom'];
+    function loadFilesInOrder(fileList){
+        const files = Array.from(fileList).slice(0,4);
+        files.forEach((f,i)=> processImageUpload(f, VIEW_ORDER[i]));
+    }
     function setupDragDrop(){
         const cc=document.getElementById('canvas-container');
         cc.addEventListener('dragover',e=>{e.preventDefault();});
-        cc.addEventListener('drop',e=>{
-            e.preventDefault();
-            if(e.dataTransfer.files[0])processImageUpload(e.dataTransfer.files[0],'front');
-            if(e.dataTransfer.files[1])processImageUpload(e.dataTransfer.files[1],'side');
-            if(e.dataTransfer.files[2])processImageUpload(e.dataTransfer.files[2],'top');
-        });
-        ['front','side','top'].forEach(k=>{
+        cc.addEventListener('drop',e=>{ e.preventDefault(); loadFilesInOrder(e.dataTransfer.files); });
+        // single multi-select picker → front · side · top · bottom in order
+        const all=document.getElementById('load-all');
+        if(all)all.addEventListener('change',e=>{ if(e.target.files.length) loadFilesInOrder(e.target.files); });
+        // individual slot pickers still work
+        VIEW_ORDER.forEach(k=>{
             const el=document.getElementById(`load-${k}`);
             if(el)el.addEventListener('change',e=>{if(e.target.files[0])processImageUpload(e.target.files[0],k);});
         });
     }
 
     // ── UI ────────────────────────────────────────────────────────
+    // CFG is the single source of truth: push its values INTO the
+    // DOM at init so the deck can never show one number while the
+    // worker builds with another (the old file shipped with three
+    // of the four forge sliders lying until first touch).
+    function syncForgeSliders(){
+        [['resolution',CFG.resolution],['sculpt',CFG.sculpt],['threshold',CFG.threshold]].forEach(([id,v])=>{
+            const el=document.getElementById(id), d=document.getElementById(`v-${id}`);
+            if(el)el.value=v; if(d)d.innerText=v;
+        });
+        const lc=document.getElementById('lumaCarve'), lcd=document.getElementById('v-lumaCarve');
+        if(lc)lc.value=CFG.lumaCarve; if(lcd)lcd.innerText=CFG.lumaCarve.toFixed(2);
+        const g=document.getElementById('s-grid'); if(g)g.innerText=`${CFG.resolution}³`;
+    }
+
     function setupUI(){
+        syncForgeSliders();
         // direct-mapped bindings — displayed value IS the worker value
         ['resolution','sculpt','threshold'].forEach(id=>{
             const el=document.getElementById(id);
@@ -1545,10 +2274,11 @@
             DOM.btnRot.classList.toggle('active',frictionEnabled);
             DOM.btnRot.textContent=frictionEnabled?'s t a t i c':'d r i f t';
         });
+        DOM.btnHull.addEventListener('click',()=>setHullMode(!hullMode));
         DOM.btnWalk.addEventListener('click',()=>setWalkMode(!walkMode));
         document.getElementById('btn-reset-cam').addEventListener('click',()=>{
             if(walkMode){spawnPlayer();showToast('. . . r e s e t . . .');}
-            else{camera.position.set(WORLD_HALF*0.9, WORLD_HALF*0.55, WORLD_HALF*0.9);controls.target.set(0,WORLD_HALF*0.5,0);controls.update();showToast('. . . a n c h o r e d . . .');}
+            else{camera.position.set(SPAN*0.95, SPAN*0.55, SPAN*0.95);controls.target.set(0,SPAN*0.3,0);controls.update();showToast('. . . a n c h o r e d . . .');}
         });
         document.getElementById('btn-screenshot').addEventListener('click',()=>{
             renderer.render(scene,walkMode?walkCamera:camera);
@@ -1577,6 +2307,9 @@
     function animate(){
         requestAnimationFrame(animate);
         const dt=Math.min(clock.getDelta(),0.05);
+        stepAtmos(dt);
+        updateWeather(dt);
+        if(skyMesh){ const c=walkMode?walkCamera:camera; if(c) skyMesh.position.copy(c.position); }
         if(walkMode){
             physics(dt);
             updateSmoke(dt);
