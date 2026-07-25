@@ -481,15 +481,20 @@ input[type="range"]:active::-webkit-slider-thumb {
             </div>
             <div class="range-row">
                 <div class="range-lbl">softness <span class="range-val" id="v-sculpt">4</span>px</div>
-                <input type="range" id="sculpt" min="0" max="80" step="1" value="4">
+                <input type="range" id="sculpt" min="0" max="32" step="0.5" value="4">
             </div>
             <div class="range-row">
                 <div class="range-lbl">loss <span class="range-val" id="v-threshold">2</span></div>
-                <input type="range" id="threshold" min="0" max="20" value="2">
+                <input type="range" id="threshold" min="0" max="120" step="2" value="2">
             </div>
             <div style="margin-top:3px;">
                 <div class="range-lbl" style="cursor:pointer;border:1px solid rgba(74,125,168,0.22);padding:4px 8px;justify-content:center;border-radius:3px;transition:all 0.2s;" id="btn-color">
                     color &nbsp;<span class="range-val" id="v-color">source</span>
+                </div>
+            </div>
+            <div style="margin-top:3px;">
+                <div class="range-lbl" style="cursor:pointer;border:1px solid rgba(74,125,168,0.22);padding:4px 8px;justify-content:center;border-radius:3px;transition:all 0.2s;" id="btn-skin">
+                    skin &nbsp;<span class="range-val" id="v-skin">nets</span>
                 </div>
             </div>
         </div>
@@ -512,6 +517,21 @@ input[type="range"]:active::-webkit-slider-thumb {
             <div id="atmos-sliders"></div>
         </div>
 
+        <div class="col col-pipe">
+            <div class="col-lbl">pipeline</div>
+            <div class="mood-grid" style="grid-template-columns:1fr">
+                <button class="mood-btn" id="btn-load-const">load constellation json</button>
+            </div>
+            <div class="col-lbl" style="margin-top:6px">replay</div>
+            <div class="wx-row" id="replay-row">
+                <button class="mood-btn" id="btn-rec">rec</button>
+                <button class="mood-btn" id="btn-play">play</button>
+                <button class="mood-btn" id="btn-wipe">wipe</button>
+            </div>
+            <div class="stat-row">tape <span class="stat-v" id="s-tape">empty</span></div>
+            <div class="stat-row">ghosts <span class="stat-v" id="s-ghosts">0</span></div>
+        </div>
+
         <div class="col col-tele">
             <div class="col-lbl">telemetry</div>
             <div class="stat-row">state <span class="stat-v" id="s-state">idle</span></div>
@@ -525,6 +545,7 @@ input[type="range"]:active::-webkit-slider-thumb {
 </div>
 
 <!-- hidden canvases for image pipeline -->
+<input type="file" id="const-file" accept=".json,application/json" style="display:none">
 <div style="display:none;">
     <canvas id="canv-front"></canvas>
     <canvas id="canv-side"></canvas>
@@ -579,6 +600,55 @@ input[type="range"]:active::-webkit-slider-thumb {
             r=hue2rgb(p,q,h+1/3);g=hue2rgb(p,q,h);b=hue2rgb(p,q,h-1/3);
         }
         return[r,g,b];
+    }
+
+    // ═══ SURFACE NETS SKIN ═══════════════════════════════════
+    // Meshes the SAME occupancy field the octree walks, but as one
+    // continuous chamfered surface instead of cubes. The cubes stay
+    // (invisible) as the collision skeleton; this is only the look.
+    const SN_cube_edges=new Int32Array(24), SN_edge_table=new Int32Array(256);
+    (function(){let k=0;for(let i=0;i<8;++i)for(let j=1;j<=4;j<<=1){const p=i^j;if(i<=p){SN_cube_edges[k++]=i;SN_cube_edges[k++]=p;}}
+    for(let i=0;i<256;++i){let em=0;for(let j=0;j<24;j+=2){const a=!!(i&(1<<SN_cube_edges[j])),b=!!(i&(1<<SN_cube_edges[j+1]));em|=a!==b?(1<<(j>>1)):0;}SN_edge_table[i]=em;}})();
+
+    function surfaceNets(data,dims){
+        const vertices=[],quads=[];let n=0;const x=[0,0,0];
+        const R=[1,dims[0]+1,(dims[0]+1)*(dims[1]+1)];const grid=new Float32Array(8);
+        let buf_no=1,buffer=new Int32Array(R[2]*2);
+        for(x[2]=0;x[2]<dims[2]-1;++x[2],n+=dims[0],buf_no^=1,R[2]=-R[2]){
+            let m=1+(dims[0]+1)*(1+buf_no*(dims[1]+1));
+            for(x[1]=0;x[1]<dims[1]-1;++x[1],++n,m+=2)
+            for(x[0]=0;x[0]<dims[0]-1;++x[0],++n,++m){
+                let mask=0,g=0,idx=n;
+                for(let k=0;k<2;++k,idx+=dims[0]*(dims[1]-2))
+                for(let j=0;j<2;++j,idx+=dims[0]-2)
+                for(let i=0;i<2;++i,++g,++idx){const p=data[idx];grid[g]=p;mask|=(p<0)?(1<<g):0;}
+                if(mask===0||mask===0xff)continue;
+                const em=SN_edge_table[mask];const v=[0,0,0];let ec=0;
+                for(let i=0;i<12;++i){if(!(em&(1<<i)))continue;++ec;
+                    const e0=SN_cube_edges[i<<1],e1=SN_cube_edges[(i<<1)+1],g0=grid[e0],g1=grid[e1];let t=g0-g1;
+                    if(Math.abs(t)>1e-6)t=g0/t;else continue;
+                    for(let j=0,k=1;j<3;++j,k<<=1){const a=e0&k,b=e1&k;if(a!==b)v[j]+=a?1-t:t;else v[j]+=a?1:0;}}
+                const s=1/ec;for(let i=0;i<3;++i)v[i]=x[i]+s*v[i];
+                buffer[m]=vertices.length;vertices.push(v);
+                for(let i=0;i<3;++i){if(!(em&(1<<i)))continue;const iu=(i+1)%3,iv=(i+2)%3;
+                    if(x[iu]===0||x[iv]===0)continue;const du=R[iu],dv=R[iv];
+                    if(mask&1)quads.push([buffer[m],buffer[m-du],buffer[m-du-dv],buffer[m-dv]]);
+                    else quads.push([buffer[m],buffer[m-dv],buffer[m-du-dv],buffer[m-du]]);}
+            }
+        }
+        return {vertices,quads};
+    }
+    function laplacianSmooth(vertices,quads,iters,lambda){
+        if(iters<=0)return vertices;
+        const N=vertices.length,nb=Array.from({length:N},()=>new Set());
+        for(const q of quads)for(let i=0;i<4;i++){const a=q[i],b=q[(i+1)%4];nb[a].add(b);nb[b].add(a);}
+        let cur=vertices.map(v=>v.slice());
+        for(let it=0;it<iters;it++){const nx=new Array(N);
+            for(let i=0;i<N;i++){const s=nb[i];if(s.size===0){nx[i]=cur[i];continue;}
+                let ax=0,ay=0,az=0;s.forEach(j=>{ax+=cur[j][0];ay+=cur[j][1];az+=cur[j][2];});const inv=1/s.size;
+                nx[i]=[cur[i][0]+lambda*(ax*inv-cur[i][0]),cur[i][1]+lambda*(ay*inv-cur[i][1]),cur[i][2]+lambda*(az*inv-cur[i][2])];}
+            cur=nx;}
+        return cur;
     }
 
     self.onmessage=function(e){
@@ -768,15 +838,62 @@ input[type="range"]:active::-webkit-slider-thumb {
                     }
                 }
             }
+            let shiftDown = 0;
             if (activeCount > 0) {
-                const shiftDown = floorY - minActiveY + (step/2);
+                shiftDown = floorY - minActiveY + (step/2);
                 for (let i = 0; i < activeCount; i++) {
                     matrices[i * 16 + 13] += shiftDown;
                 }
             }
 
+            // ── skin pass: same occupancy, sampled on the octree leaf lattice ──
+            // leaf centers sit at ((i+0.5)/res)*span, so we sample there too and
+            // the skin registers exactly with the (invisible) collision cubes.
+            let skinPos=null, skinIdx=null, skinCol=null;
+            if (activeCount > 0) {
+                const D=res, P=D+2;
+                const fieldArr=new Float32Array(P*P*P).fill(1);
+                for(let z=0;z<D;z++){const pz=(z+0.5)/D;
+                    for(let y=0;y<D;y++){const py=(y+0.5)/D;
+                        for(let x=0;x<D;x++){
+                            if(sampleOccupancy((x+0.5)/D,py,pz)) fieldArr[(x+1)+(y+1)*P+(z+1)*P*P]=-1;
+                        }}}
+                const sn=surfaceNets(fieldArr,[P,P,P]);
+                if(sn.vertices.length>0){
+                    const sm=laplacianSmooth(sn.vertices,sn.quads,3,0.55);
+                    const nv=sm.length;
+                    skinPos=new Float32Array(nv*3);
+                    skinCol=new Float32Array(nv*3);
+                    for(let i=0;i<nv;i++){
+                        const u=(sm[i][0]-0.5)/D, vy=(sm[i][1]-0.5)/D, wz=(sm[i][2]-0.5)/D;
+                        skinPos[i*3]  = u*span - span/2;
+                        skinPos[i*3+1]= vy*span + shiftDown;
+                        skinPos[i*3+2]= wz*span - span/2;
+                        const cu=Math.max(0,Math.min(1,u)), cv=Math.max(0,Math.min(1,vy)), cw=Math.max(0,Math.min(1,wz));
+                        const idxF=Math.floor((1-cv)*(sdfF.h-1))*sdfF.w + Math.floor(cu*(sdfF.w-1));
+                        if (cfg.colorMode === 'source') {
+                            const pF=idxF*4;
+                            skinCol[i*3]  =sdfF.pixels[pF]/255.0;
+                            skinCol[i*3+1]=sdfF.pixels[pF+1]/255.0;
+                            skinCol[i*3+2]=sdfF.pixels[pF+2]/255.0;
+                        } else {
+                            const idxS=Math.floor((1-cv)*(sdfS.h-1))*sdfS.w + Math.floor(cw*(sdfS.w-1));
+                            const depthMap=Math.min(1.0,Math.sqrt(Math.max(sdfF.dist[idxF],sdfS.dist[idxS]))/15.0);
+                            const rgb=hslToRgb(0.55-depthMap*0.05,0.4,0.2+depthMap*0.5);
+                            skinCol[i*3]=rgb[0];skinCol[i*3+1]=rgb[1];skinCol[i*3+2]=rgb[2];
+                        }
+                    }
+                    skinIdx=new Uint32Array(sn.quads.length*6);
+                    let k=0;
+                    for(const q of sn.quads){skinIdx[k++]=q[0];skinIdx[k++]=q[1];skinIdx[k++]=q[2];skinIdx[k++]=q[0];skinIdx[k++]=q[2];skinIdx[k++]=q[3];}
+                }
+            }
+
             const fM=matrices.slice(0,activeCount*16),fC=colors.slice(0,activeCount*3);
-            self.postMessage({type:'done',jobId,activeCount,time:performance.now()-t0,matrices:fM,colors:fC},[fM.buffer,fC.buffer]);
+            const out={type:'done',jobId,activeCount,time:performance.now()-t0,matrices:fM,colors:fC};
+            const transfers=[fM.buffer,fC.buffer];
+            if(skinPos&&skinIdx){out.skinPos=skinPos;out.skinIdx=skinIdx;out.skinCol=skinCol;transfers.push(skinPos.buffer,skinIdx.buffer,skinCol.buffer);}
+            self.postMessage(out,transfers);
         }
     };
 </script>
@@ -983,6 +1100,7 @@ input[type="range"]:active::-webkit-slider-thumb {
     // ── THREE SCENE ───────────────────────────────────────────────
     let scene, camera, renderer, controls;
     let instancedMesh, particleSystem, floorMesh;
+    let skinMesh=null, skinValid=false, SKIN_MODE='nets';   // 'nets' shows the surface skin, 'cubes' the classic voxels
     let walkCamera = null;
     let ambient, hemiLight, keyLight, fillLight, dustMat;   // hoisted for live atmosphere
 
@@ -999,7 +1117,7 @@ input[type="range"]:active::-webkit-slider-thumb {
         fogCol:new THREE.Color(0x8FB4CE), sunCol:new THREE.Color(0xF2F4F2),
         groundCol:new THREE.Color(0x3A3E42),
         sun:0.7, ambient:0.85, haze:0.1, exposure:1,
-        sunEl:0.62, sunAz:0.7,      // radians — elevation, azimuth
+        sunEl:0.3, sunAz:0.6,      // radians — elevation, azimuth
         wxAmount:0,                 // 0..1 weather density
     };
     const ATMOS_T = { ...ATMOS,
@@ -1008,7 +1126,7 @@ input[type="range"]:active::-webkit-slider-thumb {
         groundCol:ATMOS.groundCol.clone(),
     };
     let WX_TYPE='none';             // rain|snow|mist|ash|ember|none
-    let moodFade=4.0;               // seconds for a full crossfade
+    let moodFade=.2;               // seconds for a full crossfade
     let currentMood='clear';
 
     // ── MOODS ─────────────────────────────────────────────────────
@@ -1094,7 +1212,7 @@ input[type="range"]:active::-webkit-slider-thumb {
         if(scene.fog){
             scene.fog.color.copy(ATMOS.fogCol);
             // haze 1.0 → visibility ≈ one third of the span; 0 → crystal air
-            scene.fog.density = ATMOS.haze * 2.5 / SPAN;
+            scene.fog.density = ATMOS.haze * 3 / SPAN;
         }
         if(ambient)  ambient.intensity=ATMOS.ambient;
         if(keyLight){
@@ -1119,14 +1237,15 @@ input[type="range"]:active::-webkit-slider-thumb {
     // Positions are seeded from the R2 low-discrepancy sequence — no
     // Math.random, so the same mood always builds the same storm.
     // ═══════════════════════════════════════════════════════════
-    const WX = {
-        none:  { count:0,    fall:0,   drift:0,   size:0,   opacity:0,    col:0xFFFFFF, streak:0,    swirl:0 },
-        rain:  { count:2600, fall:62,  drift:2.5, size:0,   opacity:0.5,  col:0xAEC4D2, streak:0.09, swirl:0 },
-        snow:  { count:2400, fall:3.2, drift:1.6, size:2.6, opacity:0.85, col:0xFFFFFF, streak:0,    swirl:1.5 },
-        mist:  { count:1400, fall:-0.6,drift:0.5, size:9,   opacity:0.13, col:0xBFE4EC, streak:0,    swirl:0.4 },
-        ash:   { count:1800, fall:1.9, drift:1.2, size:2.2, opacity:0.5,  col:0x6E6258, streak:0,    swirl:1.1 },
-        ember: { count:900,  fall:-1.4,drift:0.9, size:2.4, opacity:0.9,  col:0xFF7A32, streak:0,    swirl:1.3 },
-    };
+const WX = {
+    none:  { count:0,    fall:0,   drift:0,   size:0,   opacity:0,    col:0xFFFFFF, streak:0,    swirl:0 },
+    rain:  { count:2600, fall:62,  drift:2.5, size:0,   opacity:0.5,  col:0xAEC4D2, streak:0.09, swirl:0 },
+    snow:  { count:2400, fall:3.2, drift:1.6, size:0.9, opacity:0.25, col:0xFFFFFF, streak:0,    swirl:1.5 },
+    mist:  { count:1400, fall:-0.6,drift:0.5, size:2.8, opacity:0.06, col:0xBFE4EC, streak:0,    swirl:0.4 },
+    ash:   { count:1800, fall:1.9, drift:1.2, size:0.8, opacity:0.22, col:0x6E6258, streak:0,    swirl:1.1 },
+    ember: { count:900,  fall:-1.4,drift:0.9, size:1.1, opacity:0.28, col:0xFF7A32, streak:0,    swirl:1.3 },
+};
+
     const WX_BOX = 120;             // metres — the local weather cell
     let wxPoints=null, wxMat=null, wxGeo=null;
     let rainLines=null, rainMat=null, rainGeo=null;
@@ -1314,6 +1433,8 @@ input[type="range"]:active::-webkit-slider-thumb {
         views:     document.getElementById('s-views'),
         buildTime: document.getElementById('s-build-time'),
         modeStr:   document.getElementById('s-mode'),
+        tape:      document.getElementById('s-tape'),
+        ghosts:    document.getElementById('s-ghosts'),
         btnRot:    document.getElementById('btn-auto-rotate'),
         btnWalk:   document.getElementById('btn-walk-toggle'),
         btnHull:   document.getElementById('btn-hull'),
@@ -1986,6 +2107,7 @@ input[type="range"]:active::-webkit-slider-thumb {
     }
 
     function requestBuild(){
+        meshLoaded=false;   // an image build supersedes a loaded mesh
         currentJobId++;
         const s=DOM.state;
         if(s){s.innerText='f o r m i n g . . .';s.classList.add('forming');}
@@ -1999,22 +2121,11 @@ input[type="range"]:active::-webkit-slider-thumb {
             if(msg.jobId!==currentJobId)return;
             const s=DOM.state; if(s)s.classList.remove('forming');
             if(msg.activeCount>0){
-                if(!instancedMesh){
-                    const g=new THREE.BoxGeometry(1,1,1);
-                    const m=new THREE.MeshStandardMaterial({roughness:0.1,metalness:0.2,flatShading:true,transparent:true,opacity:.99});
-                    instancedMesh=new THREE.InstancedMesh(g,m,msg.activeCount);
-                    scene.add(instancedMesh);
-                }
-                instancedMesh.instanceMatrix=new THREE.InstancedBufferAttribute(msg.matrices,16);
-                instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-                instancedMesh.instanceColor=new THREE.InstancedBufferAttribute(msg.colors,3);
-                instancedMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
-                instancedMesh.count=msg.matrices.length/16;
-                rebuildVoxelHash();
-                if(hullMode) buildHullFromVoxels();
-                if(s)s.innerText='q u i e t';
+                applyVoxelBuffers(msg.matrices, msg.colors, msg.matrices.length/16);
+                applySkin(msg);
             } else {
                 if(instancedMesh)instancedMesh.count=0;
+                clearSkin();
                 if(s)s.innerText='e m p t y';
             }
             if(DOM.vox)DOM.vox.innerText=msg.activeCount.toLocaleString();
@@ -2023,6 +2134,295 @@ input[type="range"]:active::-webkit-slider-thumb {
             if(DOM.buildTime)DOM.buildTime.innerText=`${msg.time.toFixed(0)}ms`;
         }
     };
+
+
+    // ═══════════════════════════════════════════════════════════
+    // [PIPE] CONSTELLATION → VOXEL
+    //
+    // CONSTELLATION_SOLID exports {vertices, faces, colors}: a relief
+    // skinned by Delaunay. This surface-voxelizes it straight into the
+    // same instanced buffers the octree worker fills, so a mesh becomes
+    // a monument you can grapple without either tool knowing about the
+    // other. The JSON is the whole contract.
+    //
+    // Surface shell only — filling a relief solid would just bury the
+    // interesting part under a mesa, and the shell is already collidable
+    // because every voxel is a real box.
+    // ═══════════════════════════════════════════════════════════
+    let meshLoaded = false;      // true = monument came from JSON, not images
+
+    function voxelizeConstellation(data){
+        const V = data.vertices, F = data.faces;
+        const C = data.colors || null;
+        if(!V || !F || !V.length || !F.length){ showToast('. . . no mesh in that json . . .'); return; }
+
+        // fit the mesh into the world span, sitting on the floor
+        let miX=1e9,miY=1e9,miZ=1e9,maX=-1e9,maY=-1e9,maZ=-1e9;
+        for(const v of V){
+            if(v[0]<miX)miX=v[0]; if(v[0]>maX)maX=v[0];
+            if(v[1]<miY)miY=v[1]; if(v[1]>maY)maY=v[1];
+            if(v[2]<miZ)miZ=v[2]; if(v[2]>maZ)maZ=v[2];
+        }
+        const ext = Math.max(maX-miX, maY-miY, maZ-miZ) || 1;
+        const target = SPAN * 0.55;
+        const k = target / ext;
+        const cxm=(miX+maX)/2, czm=(miZ+maZ)/2;
+
+        const res = CFG.resolution;
+        const step = SPAN / res;                  // one voxel edge, world units
+        const cells = new Map();                  // key → {r,g,b,n}
+
+        const put = (x,y,z,r,g,b)=>{
+            const ix=Math.round(x/step), iy=Math.round(y/step), iz=Math.round(z/step);
+            const key = ix+','+iy+','+iz;
+            let c = cells.get(key);
+            if(!c){ c={x:ix*step, y:iy*step, z:iz*step, r:0,g:0,b:0,n:0}; cells.set(key,c); }
+            c.r+=r; c.g+=g; c.b+=b; c.n++;
+        };
+
+        const mapV = i => ({
+            x: (V[i][0]-cxm)*k,
+            y: (V[i][1]-miY)*k + CFG.floorY + step*0.5,
+            z: (V[i][2]-czm)*k,
+        });
+
+        const MAXV = 160000;
+        for(let f=0; f<F.length; f++){
+            const [ia,ib,ic] = F[f];
+            const A=mapV(ia), B=mapV(ib), Cc=mapV(ic);
+            const cr = C ? [(C[ia][0]+C[ib][0]+C[ic][0])/765, (C[ia][1]+C[ib][1]+C[ic][1])/765, (C[ia][2]+C[ib][2]+C[ic][2])/765] : [0.6,0.62,0.6];
+
+            // barycentric sampling dense enough that no voxel slips between
+            // samples: step along the two longest edges at half a voxel
+            const e1 = Math.hypot(B.x-A.x, B.y-A.y, B.z-A.z);
+            const e2 = Math.hypot(Cc.x-A.x, Cc.y-A.y, Cc.z-A.z);
+            const n1 = Math.max(1, Math.min(48, Math.ceil(e1/(step*0.5))));
+            const n2 = Math.max(1, Math.min(48, Math.ceil(e2/(step*0.5))));
+            for(let i=0;i<=n1;i++){
+                const u=i/n1;
+                for(let j=0;j<=n2;j++){
+                    const v=j/n2;
+                    if(u+v>1) continue;
+                    put(A.x+(B.x-A.x)*u+(Cc.x-A.x)*v,
+                        A.y+(B.y-A.y)*u+(Cc.y-A.y)*v,
+                        A.z+(B.z-A.z)*u+(Cc.z-A.z)*v,
+                        cr[0],cr[1],cr[2]);
+                }
+            }
+            if(cells.size>MAXV) break;
+        }
+
+        if(!cells.size){ showToast('. . . mesh voxelized to nothing . . .'); return; }
+
+        const count = Math.min(cells.size, MAXV);
+        const mArr = new Float32Array(count*16);
+        const cArr = new Float32Array(count*3);
+        const size = step * (1 - CFG.blockGap);
+        let i=0;
+        for(const c of cells.values()){
+            if(i>=count) break;
+            const b=i*16;
+            mArr[b]=size;   mArr[b+5]=size;  mArr[b+10]=size; mArr[b+15]=1;
+            mArr[b+12]=c.x; mArr[b+13]=c.y;  mArr[b+14]=c.z;
+            const q=i*3;
+            cArr[q]=c.r/c.n; cArr[q+1]=c.g/c.n; cArr[q+2]=c.b/c.n;
+            i++;
+        }
+
+        applyVoxelBuffers(mArr, cArr, count);
+        clearSkin();   // pipe loads have no skin data — show the real cubes, not a stale surface
+        meshLoaded = true;
+        currentJobId++;   // orphan any worker build still in flight
+        showToast('. . . ' + count.toLocaleString() + ' voxels from mesh . . .');
+    }
+
+    // shared with the worker's done handler — one place that owns the mesh
+    function applyVoxelBuffers(mArr, cArr, count){
+        if(!instancedMesh){
+            const g=new THREE.BoxGeometry(1,1,1);
+            const m=new THREE.MeshStandardMaterial({roughness:0.1,metalness:0.2,flatShading:true,transparent:true,opacity:.99});
+            instancedMesh=new THREE.InstancedMesh(g,m,count);
+            scene.add(instancedMesh);
+        } else if(count > instancedMesh.instanceMatrix.count){
+            scene.remove(instancedMesh);
+            instancedMesh.geometry.dispose();
+            const g=new THREE.BoxGeometry(1,1,1);
+            const m=new THREE.MeshStandardMaterial({roughness:0.1,metalness:0.2,flatShading:true,transparent:true,opacity:.99});
+            instancedMesh=new THREE.InstancedMesh(g,m,count);
+            scene.add(instancedMesh);
+        }
+        instancedMesh.instanceMatrix=new THREE.InstancedBufferAttribute(mArr,16);
+        instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        instancedMesh.instanceColor=new THREE.InstancedBufferAttribute(cArr,3);
+        instancedMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+        instancedMesh.count=count;
+        rebuildVoxelHash();
+        if(hullMode) buildHullFromVoxels();
+        if(DOM.vox)DOM.vox.innerText=count.toLocaleString();
+        const st=DOM.state; if(st){ st.classList.remove('forming'); st.innerText='q u i e t'; }
+    }
+
+    // ═══ SURFACE-NETS SKIN (visual only — cubes stay as collision) ═══
+    function updateSkinVis(){
+        if(hullMode){ if(skinMesh) skinMesh.visible=false; return; }   // hull owns the view while on
+        const nets = (SKIN_MODE==='nets') && skinValid && skinMesh;
+        if(skinMesh) skinMesh.visible = !!nets;
+        if(instancedMesh) instancedMesh.visible = !nets;
+    }
+    function clearSkin(){
+        skinValid=false;
+        updateSkinVis();
+    }
+    function applySkin(msg){
+        if(!msg.skinPos || !msg.skinIdx || msg.skinPos.length===0){ clearSkin(); return; }
+        if(skinMesh){
+            scene.remove(skinMesh);
+            skinMesh.geometry.dispose();
+            skinMesh.material.dispose();
+            skinMesh=null;
+        }
+        const g=new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(msg.skinPos,3));
+        g.setAttribute('color', new THREE.BufferAttribute(msg.skinCol,3));
+        g.setIndex(new THREE.BufferAttribute(msg.skinIdx,1));
+        g.computeVertexNormals();
+        const m=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.55,metalness:0.15});
+        skinMesh=new THREE.Mesh(g,m);
+        skinMesh.frustumCulled=false;   // monument spans the world; never let culling blink it out
+        scene.add(skinMesh);
+        skinValid=true;
+        updateSkinVis();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // [TAPE] REPLAY — ghosts of your own flights
+    //
+    // Samples the player at a fixed rate and plays it back as a ghost
+    // that loops forever. Each new take stacks: fly, record, fly again,
+    // and the air fills with everyone you've been. Recording is pure
+    // observation — it never touches physics, so a tape can't change
+    // how the run felt.
+    //
+    // Honest limit: the tape stores the PLAYER, not the world. Load a
+    // different monument and your ghosts will fly through it — which
+    // is either a bug or the best thing in here, depending on the day.
+    // ═══════════════════════════════════════════════════════════
+    const TAPE = {
+        hz: 20,
+        maxSec: 120,
+        recording: false,
+        buf: [],
+        acc: 0,
+    };
+    let ghosts = [];   // {frames, t, group, rope}
+
+    function makeGhostBody(){
+        const g = new THREE.Group();
+        const mat = new THREE.MeshStandardMaterial({
+            color:0x8FE3C0, emissive:0x1E5A44, transparent:true, opacity:0.34,
+            depthWrite:false, roughness:0.6,
+        });
+        const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.3,1.0,8), mat);
+        torso.position.y = 1.05;
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.16,10,8), mat);
+        head.position.y = 1.72;
+        // trailing cone reads as direction at a glance from 300m away
+        const tail = new THREE.Mesh(new THREE.ConeGeometry(0.3,0.9,8), mat);
+        tail.position.y = 0.4; tail.rotation.x = Math.PI;
+        g.add(torso, head, tail);
+
+        const ropeMat = new THREE.LineBasicMaterial({color:0x8FE3C0, transparent:true, opacity:0.3});
+        const ropeGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
+        const rope = new THREE.Line(ropeGeo, ropeMat);
+        rope.frustumCulled=false;
+        scene.add(g); scene.add(rope);
+        return { group:g, rope };
+    }
+
+    function tapeRecord(dt){
+        if(!TAPE.recording || !walkMode) return;
+        TAPE.acc += dt;
+        const iv = 1/TAPE.hz;
+        if(TAPE.acc < iv) return;
+        TAPE.acc = 0;
+        TAPE.buf.push({
+            x:player.pos.x, y:player.pos.y, z:player.pos.z,
+            yaw:player.yaw, pitch:player.pitch, roll:player.roll,
+            g: grapple.active?1:0,
+            ax:grapple.anchor.x, ay:grapple.anchor.y, az:grapple.anchor.z,
+        });
+        if(TAPE.buf.length > TAPE.hz*TAPE.maxSec) TAPE.buf.shift();
+        updateTapeHUD();
+    }
+
+    function updateTapeHUD(){
+        if(DOM.tape){
+            DOM.tape.innerText = TAPE.recording
+                ? '● rec ' + (TAPE.buf.length/TAPE.hz).toFixed(1) + 's'
+                : (TAPE.buf.length ? (TAPE.buf.length/TAPE.hz).toFixed(1)+'s' : 'empty');
+        }
+        if(DOM.ghosts) DOM.ghosts.innerText = ghosts.length;
+    }
+
+    function tapeToggleRec(){
+        TAPE.recording = !TAPE.recording;
+        if(TAPE.recording){ TAPE.buf=[]; TAPE.acc=0; showToast('. . . recording . . .'); }
+        else showToast('. . . ' + (TAPE.buf.length/TAPE.hz).toFixed(1) + 's on tape . . .');
+        document.getElementById('btn-rec').classList.toggle('active', TAPE.recording);
+        updateTapeHUD();
+    }
+
+    function tapeSpawnGhost(){
+        if(TAPE.buf.length < 4){ showToast('. . . nothing on tape . . .'); return; }
+        const body = makeGhostBody();
+        ghosts.push({ frames: TAPE.buf.slice(), t:0, ...body });
+        if(ghosts.length > 8) tapeKill(0);
+        showToast('. . . ghost ' + ghosts.length + ' released . . .');
+        updateTapeHUD();
+    }
+
+    function tapeKill(i){
+        const g = ghosts[i];
+        if(!g) return;
+        scene.remove(g.group); scene.remove(g.rope);
+        g.rope.geometry.dispose();
+        ghosts.splice(i,1);
+    }
+
+    function tapeWipe(){
+        while(ghosts.length) tapeKill(0);
+        TAPE.buf=[]; TAPE.recording=false;
+        document.getElementById('btn-rec').classList.remove('active');
+        updateTapeHUD();
+        showToast('. . . tape wiped . . .');
+    }
+
+    function updateGhosts(dt){
+        if(!ghosts.length) return;
+        const iv = 1/TAPE.hz;
+        for(const gh of ghosts){
+            gh.t += dt;
+            const total = (gh.frames.length-1)*iv;
+            if(gh.t > total) gh.t -= total;          // loop forever
+            const fi = gh.t/iv;
+            const i0 = Math.floor(fi), i1 = Math.min(gh.frames.length-1, i0+1);
+            const f = fi - i0;
+            const a = gh.frames[i0], b = gh.frames[i1];
+            if(!a||!b) continue;
+            gh.group.position.set(a.x+(b.x-a.x)*f, a.y+(b.y-a.y)*f, a.z+(b.z-a.z)*f);
+            // yaw wraps ±π — interpolate the short way or the ghost spins
+            const dy = Math.atan2(Math.sin(b.yaw-a.yaw), Math.cos(b.yaw-a.yaw));
+            gh.group.rotation.set(0, a.yaw + dy*f, a.roll+(b.roll-a.roll)*f);
+
+            const rp = gh.rope.geometry.attributes.position;
+            if(a.g){
+                rp.setXYZ(0, gh.group.position.x, gh.group.position.y+M.eyeOffset, gh.group.position.z);
+                rp.setXYZ(1, a.ax, a.ay, a.az);
+                rp.needsUpdate = true;
+                gh.rope.visible = true;
+            } else gh.rope.visible = false;
+        }
+    }
 
     // ── CONVEX HULL ───────────────────────────────────────────────
     function buildHullFromVoxels(){
@@ -2074,11 +2474,12 @@ input[type="range"]:active::-webkit-slider-thumb {
         if(on){
             buildHullFromVoxels();
             if(instancedMesh) instancedMesh.visible = false;
+            if(skinMesh) skinMesh.visible = false;   // hull replaces the monument view entirely
             DOM.btnHull.classList.add('active');
             showToast('. . . h u l l . . .');
         } else {
             if(hullMesh){ scene.remove(hullMesh); hullMesh.geometry.dispose(); hullMesh.material.dispose(); hullMesh = null; }
-            if(instancedMesh) instancedMesh.visible = true;
+            updateSkinVis();   // restore whichever skin mode is active (nets or cubes)
             DOM.btnHull.classList.remove('active');
             showToast('. . . v o x e l s . . .');
         }
@@ -2199,6 +2600,24 @@ input[type="range"]:active::-webkit-slider-thumb {
         setMood('clear');
         document.querySelector('[data-wx="none"]').classList.add('active');
 
+        // pipeline + replay
+        const cf=document.getElementById('const-file');
+        document.getElementById('btn-load-const').addEventListener('click',()=>cf.click());
+        cf.addEventListener('change',e=>{
+            const file=e.target.files[0]; if(!file) return;
+            const r=new FileReader();
+            r.onload=ev=>{
+                try{ voxelizeConstellation(JSON.parse(ev.target.result)); }
+                catch(err){ showToast('. . . bad json . . .'); }
+            };
+            r.readAsText(file);
+            cf.value='';
+        });
+        document.getElementById('btn-rec').addEventListener('click',tapeToggleRec);
+        document.getElementById('btn-play').addEventListener('click',tapeSpawnGhost);
+        document.getElementById('btn-wipe').addEventListener('click',tapeWipe);
+        updateTapeHUD();
+
         document.addEventListener('touchstart',onTouchStart,{passive:false});
         document.addEventListener('touchmove', onTouchMove, {passive:false});
         document.addEventListener('touchend',  onTouchEnd,  {passive:false});
@@ -2251,10 +2670,11 @@ input[type="range"]:active::-webkit-slider-thumb {
     function setupUI(){
         syncForgeSliders();
         // direct-mapped bindings — displayed value IS the worker value
-        ['resolution','sculpt','threshold'].forEach(id=>{
+        // resolution must stay integer (it sizes buffers); sculpt/threshold are continuous
+        [['resolution',parseInt],['sculpt',parseFloat],['threshold',parseFloat]].forEach(([id,parse])=>{
             const el=document.getElementById(id);
             if(el)el.addEventListener('input',e=>{
-                CFG[id]=parseInt(e.target.value);
+                CFG[id]=parse(e.target.value);
                 const d=document.getElementById(`v-${id}`); if(d)d.innerText=e.target.value;
                 debouncedBuild();
             });
@@ -2268,6 +2688,12 @@ input[type="range"]:active::-webkit-slider-thumb {
             CFG.colorMode=CFG.colorMode==='thermal'?'source':'thermal';
             document.getElementById('v-color').innerText=CFG.colorMode;
             requestBuild();
+        });
+        document.getElementById('btn-skin').addEventListener('click',()=>{
+            SKIN_MODE = SKIN_MODE==='nets' ? 'cubes' : 'nets';
+            document.getElementById('v-skin').innerText=SKIN_MODE;
+            updateSkinVis();
+            showToast('. . . skin: ' + SKIN_MODE + ' . . .');
         });
         DOM.btnRot.addEventListener('click',()=>{
             frictionEnabled=!frictionEnabled;
@@ -2310,8 +2736,10 @@ input[type="range"]:active::-webkit-slider-thumb {
         stepAtmos(dt);
         updateWeather(dt);
         if(skyMesh){ const c=walkMode?walkCamera:camera; if(c) skyMesh.position.copy(c.position); }
+        updateGhosts(dt);
         if(walkMode){
             physics(dt);
+            tapeRecord(dt);
             updateSmoke(dt);
             if(particleSystem){particleSystem.rotation.y+=0.0001;particleSystem.rotation.x+=0.0001;}
             renderer.render(scene,walkCamera);
