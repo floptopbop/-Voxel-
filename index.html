@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PANDRA_OS // ODM</title>
+    <title>PANDRA_OS // DRIFT v1</title>
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -40,8 +40,8 @@
     --hi:        #B8DDEF;
 
     /* ── Text tiers ── */
-    --text-pri:  #DOECFO;
-    --text-sec:  #DDE2E6;
+    --text-pri:  #FFEDCE;   /* was #DOECFO — letter O's, invalid, silently dead */
+    --text-sec:  #FFE6BD;
     --text-dim:  #9AA5A7;
 
     /* ── Warm / state accents ── */
@@ -131,6 +131,45 @@ body.in-walk #ui-deck.peek  { opacity: 0.96; transition: opacity 0.15s; }
 .col-cam   { flex: 1.6; }
 .col-atmos { flex: 1.6; }
 .col-tele  { flex: 1; min-width: 96px; }
+    .col-scan  { flex: 1.4; min-width: 110px; }
+
+/* ── ATMOS SCAN DROP ZONE ── */
+#atmos-drop {
+    border: 1px dashed rgba(74,125,168,0.35);
+    padding: 8px 6px;
+    text-align: center;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+    margin-bottom: 6px;
+    background: rgba(6,38,54,0.35);
+}
+#atmos-drop:hover, #atmos-drop.drag-over {
+    border-color: var(--accent2);
+    background: rgba(74,125,168,0.12);
+}
+#atmos-drop input[type="file"] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+}
+#atmos-drop-lbl {
+    font-size: 0.55rem; color: var(--text-dim); letter-spacing: 1.5px;
+    text-transform: lowercase; line-height: 1.6; pointer-events: none;
+}
+#atmos-scan-result {
+    font-size: 0.55rem; line-height: 1.7; letter-spacing: 0.5px;
+    color: var(--text-dim);
+}
+#atmos-scan-result .sr-key { color: var(--text-sec); }
+#atmos-scan-result .sr-val { color: var(--hi); }
+.atmos-swatch-row {
+    display: flex; gap: 3px; margin: 4px 0;
+}
+.atmos-swatch {
+    width: 14px; height: 14px; border-radius: 2px;
+    border: 1px solid rgba(255,255,255,0.1);
+    flex-shrink: 0;
+}
 
 .col-lbl {
     font-size: 0.65rem; letter-spacing: 2px; color: var(--muted);
@@ -283,16 +322,71 @@ input[type="range"]:active::-webkit-slider-thumb {
 /* ── WALK HUD ── */
 #walk-hud {
     display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 40;
-    padding: 12px 20px;
-    background: linear-gradient(to bottom, rgba(4,32,46,0.90), transparent);
-    font-size: 0.62rem; letter-spacing: 2px; text-transform: lowercase;
-    pointer-events: none; justify-content: space-between; align-items: center;
+    padding: 10px 16px 8px;
+    background: linear-gradient(to bottom, rgba(2,18,28,0.88) 0%, transparent 100%);
+    font-size: 0.6rem; letter-spacing: 2px; text-transform: lowercase;
+    pointer-events: none; flex-direction: column; gap: 4px;
 }
-.whud-title { color: var(--hi); letter-spacing: 4px; }
-.whud-stats { display: flex; gap: 18px; }
-.whud-stat  { color: var(--text-sec); }
+/* top bar — title + core stats */
+.whud-top {
+    display: flex; align-items: center; gap: 20px;
+}
+.whud-title {
+    color: var(--hi); letter-spacing: 5px; font-size: 0.65rem;
+    border-right: 1px solid rgba(184,221,239,0.2); padding-right: 14px;
+}
+.whud-stats { display: flex; gap: 16px; flex: 1; align-items: center; }
+.whud-stat  { color: var(--text-dim); }
 .whud-stat span { color: var(--hi); }
-#wh-status  { color: var(--gold-hi); }
+#wh-status  { color: var(--gold-hi); margin-left: auto; letter-spacing: 3px; }
+/* bottom bar — heading tape + proximity */
+.whud-bottom {
+    display: flex; align-items: center; gap: 14px;
+}
+#wh-heading-tape {
+    flex: 1; height: 14px; position: relative; overflow: hidden;
+    border-top: 1px solid rgba(184,221,239,0.12);
+}
+#wh-heading-inner {
+    position: absolute; top: 0; white-space: nowrap;
+    font-size: 0.5rem; letter-spacing: 1px; color: rgba(184,221,239,0.45);
+    transition: none;
+}
+#wh-heading-deg {
+    color: var(--hi); font-size: 0.58rem; min-width: 38px; text-align: right;
+}
+#wh-proximity {
+    font-size: 0.56rem; color: var(--text-dim); min-width: 60px;
+}
+#wh-proximity.near { color: var(--muted); }
+#wh-proximity.close { color: var(--danger); animation: proxFlash 0.4s ease infinite alternate; }
+@keyframes proxFlash { from { opacity:1; } to { opacity:0.3; } }
+/* pitch ladder — right side vertical */
+#wh-pitch {
+    position: fixed; right: 22px; top: 50%; transform: translateY(-50%);
+    z-index: 40; pointer-events: none; display: none;
+    flex-direction: column; align-items: flex-end; gap: 0;
+    font-size: 0.48rem; color: rgba(184,221,239,0.4); letter-spacing: 1px;
+}
+#wh-pitch-needle {
+    position: fixed; right: 16px; top: 50%; z-index: 40; pointer-events: none;
+    display: none; width: 6px; height: 1px;
+    background: var(--hi); transform: translateY(-50%);
+}
+/* speed bar — left side */
+#wh-speed-bar {
+    position: fixed; left: 18px; top: 30%; height: 40%;
+    z-index: 40; pointer-events: none; display: none;
+    flex-direction: column; justify-content: flex-end; align-items: flex-start;
+}
+#wh-speed-fill {
+    width: 3px; background: linear-gradient(to top, var(--accent), var(--hi));
+    border-radius: 2px; transition: height 0.1s;
+}
+#wh-speed-val {
+    font-size: 0.52rem; color: var(--hi); letter-spacing: 1px;
+    margin-top: 4px; min-width: 32px;
+}
 
 /* ── ODM DUAL JOYSTICKS ── */
 .odm-joy {
@@ -360,6 +454,33 @@ input[type="range"]:active::-webkit-slider-thumb {
 @keyframes pulse { 0%,100% { opacity:0.85; } 50% { opacity:0.25; } }
 .forming { animation: pulse 1.6s ease-in-out infinite; color: var(--hi) !important; }
 
+/* ── ENTITY HUD OVERLAYS ── */
+#ent-alert {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    z-index: 60; pointer-events: none; display: none;
+    font-size: 0.62rem; letter-spacing: 6px; text-transform: lowercase;
+    color: var(--ember); text-shadow: 0 0 14px rgba(153,50,48,0.5);
+    animation: entFade 2.6s ease forwards;
+}
+@keyframes entFade { 0%{opacity:0;} 18%{opacity:1;} 70%{opacity:1;} 100%{opacity:0;} }
+#scan-readout {
+    position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%);
+    z-index: 55; pointer-events: none; display: none;
+    font-size: 0.55rem; letter-spacing: 4px; text-align: center;
+    color: var(--text-sec);
+}
+#scan-readout .sr-lbl { color: rgba(255,237,206,0.32); margin-right: 10px; }
+#scan-pct { color: var(--text-pri); text-shadow: 0 0 10px rgba(255,230,189,0.25); }
+#scan-pct.complete { color: var(--gold-hi); text-shadow: 0 0 14px var(--glow-gold); }
+#scan-cells { color: rgba(255,237,206,0.26); margin-left: 10px; font-size: 0.48rem; }
+/* watcher-spotted flash — cold blue wash */
+#watch-flash {
+    position: fixed; inset: 0; z-index: 36; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(60,120,180,0.18) 0%, transparent 70%);
+    transition: opacity 1.6s;
+}
+#watch-flash.on { opacity: 1; transition: opacity 0.1s; }
+
 /* ── DROP HINT ── */
 #drop-hint {
     position: absolute; inset: 0; pointer-events: none; z-index: 20;
@@ -407,24 +528,42 @@ input[type="range"]:active::-webkit-slider-thumb {
 
 <div id="toast-container"></div>
 <div id="walk-crosshair"></div>
+<div id="ent-alert"></div>
+<div id="scan-readout"><span class="sr-lbl">surveyed</span><span id="scan-pct">——</span><span id="scan-cells"></span></div>
+<div id="watch-flash"></div>
 <div id="grab-flash"></div>
 
 <div id="walk-hud">
-    <div class="whud-title">voxel</div>
-    <div class="whud-stats">
-        <div class="whud-stat">pos <span id="wh-pos">—</span></div>
-        <div class="whud-stat">spd <span id="wh-spd">—</span></div>
-        <div class="whud-stat">alt <span id="wh-alt">—</span></div>
-        <div class="whud-stat"><span id="wh-status">idle</span></div>
+    <div class="whud-top">
+        <div class="whud-title">pandra</div>
+        <div class="whud-stats">
+            <div class="whud-stat">v <span id="wh-spd">—</span></div>
+            <div class="whud-stat">alt <span id="wh-alt">—</span></div>
+            <div class="whud-stat">pos <span id="wh-pos">—</span></div>
+            <div class="whud-stat">rope <span id="wh-rope">—</span></div>
+            <span id="wh-status">idle</span>
+        </div>
+    </div>
+    <div class="whud-bottom">
+        <span id="wh-heading-deg">000°</span>
+        <div id="wh-heading-tape"><div id="wh-heading-inner"></div></div>
+        <span id="wh-proximity"></span>
     </div>
 </div>
+<!-- side instruments -->
+<div id="wh-speed-bar" style="display:none">
+    <div id="wh-speed-fill" style="height:0%"></div>
+    <div id="wh-speed-val">0</div>
+</div>
+<div id="wh-pitch" style="display:none"></div>
+<div id="wh-pitch-needle" style="display:none"></div>
 
 <div class="odm-joy" id="joyL"><span class="j-lbl">move · fwd = gas</span><div class="odm-knob" id="knobL"></div></div>
 <div class="odm-joy" id="joyR"><span class="j-lbl">look · touch = grapple</span><div class="odm-knob" id="knobR"></div></div>
 
 <div id="ui-deck">
     <div id="deck-tab">
-        <span><span id="deck-toggle">▼</span> boxvox</span>
+        <span><span id="deck-toggle">▼</span> boxvox · DRIFT v1</span>
         <div style="display:flex;gap:6px;">
             <button class="icon-btn" id="btn-walk-toggle">wander</button>
             <button class="icon-btn" id="btn-auto-rotate">drift</button>
@@ -472,29 +611,24 @@ input[type="range"]:active::-webkit-slider-thumb {
         <div class="col col-tune">
             <div class="col-lbl">memory</div>
             <div class="range-row">
-                <div class="range-lbl">density <span class="range-val" id="v-resolution">220</span>³</div>
-                <input type="range" id="resolution" min="4" max="400" step="4" value="220">
+                <div class="range-lbl">density <span class="range-val" id="v-resolution">64</span>³</div>
+                <input type="range" id="resolution" min="4" max="180" step="4" value="64">
             </div>
             <div class="range-row">
                 <div class="range-lbl">shadows <span class="range-val" id="v-lumaCarve">0.10</span></div>
-                <input type="range" id="lumaCarve" min="0" max="10" step="0.01" value="0.1">
+                <input type="range" id="lumaCarve" min="0" max="1" step="0.01" value="0.1">
             </div>
             <div class="range-row">
                 <div class="range-lbl">softness <span class="range-val" id="v-sculpt">4</span>px</div>
-                <input type="range" id="sculpt" min="0" max="180" step="1" value="4">
+                <input type="range" id="sculpt" min="0" max="80" step="1" value="4">
             </div>
             <div class="range-row">
                 <div class="range-lbl">loss <span class="range-val" id="v-threshold">2</span></div>
-                <input type="range" id="threshold" min="0" max="100" value="2">
+                <input type="range" id="threshold" min="0" max="20" value="2">
             </div>
             <div style="margin-top:3px;">
                 <div class="range-lbl" style="cursor:pointer;border:1px solid rgba(74,125,168,0.22);padding:4px 8px;justify-content:center;border-radius:3px;transition:all 0.2s;" id="btn-color">
                     color &nbsp;<span class="range-val" id="v-color">source</span>
-                </div>
-            </div>
-            <div style="margin-top:3px;">
-                <div class="range-lbl" style="cursor:pointer;border:1px solid rgba(74,125,168,0.22);padding:4px 8px;justify-content:center;border-radius:3px;transition:all 0.2s;" id="btn-skin">
-                    skin &nbsp;<span class="range-val" id="v-skin">nets</span>
                 </div>
             </div>
         </div>
@@ -530,6 +664,15 @@ input[type="range"]:active::-webkit-slider-thumb {
             </div>
             <div class="stat-row">tape <span class="stat-v" id="s-tape">empty</span></div>
             <div class="stat-row">ghosts <span class="stat-v" id="s-ghosts">0</span></div>
+        </div>
+
+        <div class="col col-scan">
+            <div class="col-lbl">atmos scan</div>
+            <div id="atmos-drop">
+                <input type="file" id="atmos-scan-file" accept="image/*">
+                <div id="atmos-drop-lbl">drop image<br>to read atmosphere</div>
+            </div>
+            <div id="atmos-scan-result"></div>
         </div>
 
         <div class="col col-tele">
@@ -606,50 +749,6 @@ input[type="range"]:active::-webkit-slider-thumb {
     // Meshes the SAME occupancy field the octree walks, but as one
     // continuous chamfered surface instead of cubes. The cubes stay
     // (invisible) as the collision skeleton; this is only the look.
-    const SN_cube_edges=new Int32Array(24), SN_edge_table=new Int32Array(256);
-    (function(){let k=0;for(let i=0;i<8;++i)for(let j=1;j<=4;j<<=1){const p=i^j;if(i<=p){SN_cube_edges[k++]=i;SN_cube_edges[k++]=p;}}
-    for(let i=0;i<256;++i){let em=0;for(let j=0;j<24;j+=2){const a=!!(i&(1<<SN_cube_edges[j])),b=!!(i&(1<<SN_cube_edges[j+1]));em|=a!==b?(1<<(j>>1)):0;}SN_edge_table[i]=em;}})();
-
-    function surfaceNets(data,dims){
-        const vertices=[],quads=[];let n=0;const x=[0,0,0];
-        const R=[1,dims[0]+1,(dims[0]+1)*(dims[1]+1)];const grid=new Float32Array(8);
-        let buf_no=1,buffer=new Int32Array(R[2]*2);
-        for(x[2]=0;x[2]<dims[2]-1;++x[2],n+=dims[0],buf_no^=1,R[2]=-R[2]){
-            let m=1+(dims[0]+1)*(1+buf_no*(dims[1]+1));
-            for(x[1]=0;x[1]<dims[1]-1;++x[1],++n,m+=2)
-            for(x[0]=0;x[0]<dims[0]-1;++x[0],++n,++m){
-                let mask=0,g=0,idx=n;
-                for(let k=0;k<2;++k,idx+=dims[0]*(dims[1]-2))
-                for(let j=0;j<2;++j,idx+=dims[0]-2)
-                for(let i=0;i<2;++i,++g,++idx){const p=data[idx];grid[g]=p;mask|=(p<0)?(1<<g):0;}
-                if(mask===0||mask===0xff)continue;
-                const em=SN_edge_table[mask];const v=[0,0,0];let ec=0;
-                for(let i=0;i<12;++i){if(!(em&(1<<i)))continue;++ec;
-                    const e0=SN_cube_edges[i<<1],e1=SN_cube_edges[(i<<1)+1],g0=grid[e0],g1=grid[e1];let t=g0-g1;
-                    if(Math.abs(t)>1e-6)t=g0/t;else continue;
-                    for(let j=0,k=1;j<3;++j,k<<=1){const a=e0&k,b=e1&k;if(a!==b)v[j]+=a?1-t:t;else v[j]+=a?1:0;}}
-                const s=1/ec;for(let i=0;i<3;++i)v[i]=x[i]+s*v[i];
-                buffer[m]=vertices.length;vertices.push(v);
-                for(let i=0;i<3;++i){if(!(em&(1<<i)))continue;const iu=(i+1)%3,iv=(i+2)%3;
-                    if(x[iu]===0||x[iv]===0)continue;const du=R[iu],dv=R[iv];
-                    if(mask&1)quads.push([buffer[m],buffer[m-du],buffer[m-du-dv],buffer[m-dv]]);
-                    else quads.push([buffer[m],buffer[m-dv],buffer[m-du-dv],buffer[m-du]]);}
-            }
-        }
-        return {vertices,quads};
-    }
-    function laplacianSmooth(vertices,quads,iters,lambda){
-        if(iters<=0)return vertices;
-        const N=vertices.length,nb=Array.from({length:N},()=>new Set());
-        for(const q of quads)for(let i=0;i<4;i++){const a=q[i],b=q[(i+1)%4];nb[a].add(b);nb[b].add(a);}
-        let cur=vertices.map(v=>v.slice());
-        for(let it=0;it<iters;it++){const nx=new Array(N);
-            for(let i=0;i<N;i++){const s=nb[i];if(s.size===0){nx[i]=cur[i];continue;}
-                let ax=0,ay=0,az=0;s.forEach(j=>{ax+=cur[j][0];ay+=cur[j][1];az+=cur[j][2];});const inv=1/s.size;
-                nx[i]=[cur[i][0]+lambda*(ax*inv-cur[i][0]),cur[i][1]+lambda*(ay*inv-cur[i][1]),cur[i][2]+lambda*(az*inv-cur[i][2])];}
-            cur=nx;}
-        return cur;
-    }
 
     self.onmessage=function(e){
         const msg=e.data;
@@ -710,7 +809,7 @@ input[type="range"]:active::-webkit-slider-thumb {
                 if (dSSq === 0) return null;
 
                 let idxT = 0;
-                if (useTop && py >= 0.5) {                 // top silhouette governs the upper half
+                if (useTop && py >= 1) {                 // top silhouette governs the upper half
                     const imgY_T = Math.floor(pz * (sdfT.h - 1)) * sdfT.w;
                     const imgX_T = Math.floor(px * (sdfT.w - 1));
                     idxT = imgY_T + imgX_T;
@@ -749,24 +848,6 @@ input[type="range"]:active::-webkit-slider-thumb {
                 }
 
                 return { dFSq, dSSq, idxF };
-            }
-
-            // a leaf is buried (never visible) only if all 6 face-neighbors
-            // are also solid. off-domain neighbors count as exposed —
-            // nothing exists past the unit cube, so edge leaves always emit.
-            function neighborEmpty(px, py, pz) {
-                if (px < 0 || px > 1 || py < 0 || py > 1 || pz < 0 || pz > 1) return true;
-                return !sampleOccupancy(px, py, pz);
-            }
-            function isBuried(x, y, z, size) {
-                const cx = x + size/2, cy = y + size/2, cz = z + size/2;
-                if (neighborEmpty(cx - size, cy, cz)) return false;
-                if (neighborEmpty(cx + size, cy, cz)) return false;
-                if (neighborEmpty(cx, cy - size, cz)) return false;
-                if (neighborEmpty(cx, cy + size, cz)) return false;
-                if (neighborEmpty(cx, cy, cz - size)) return false;
-                if (neighborEmpty(cx, cy, cz + size)) return false;
-                return true;
             }
 
             function emitVoxelNode(bx, by, bz, bSize, sample) {
@@ -817,13 +898,7 @@ input[type="range"]:active::-webkit-slider-thumb {
                 const centerSample = sampleOccupancy(node.x + halfSize, node.y + halfSize, node.z + halfSize);
 
                 if (node.size <= baseVoxelResolutionStep + 0.0001) {
-                    // only leaf-size nodes get the buried check — merged
-                    // interior blocks are already deep enough (the edgeDist
-                    // force-split below guarantees they never touch the
-                    // true surface) so they're always emitted as-is.
-                    if (centerSample && !isBuried(node.x, node.y, node.z, node.size)) {
-                        emitVoxelNode(node.x, node.y, node.z, node.size, centerSample);
-                    }
+                    if (centerSample) emitVoxelNode(node.x, node.y, node.z, node.size, centerSample);
                     continue;
                 }
 
@@ -880,54 +955,9 @@ input[type="range"]:active::-webkit-slider-thumb {
                 }
             }
 
-            // ── skin pass: same occupancy, sampled on the octree leaf lattice ──
-            // leaf centers sit at ((i+0.5)/res)*span, so we sample there too and
-            // the skin registers exactly with the (invisible) collision cubes.
-            let skinPos=null, skinIdx=null, skinCol=null;
-            if (activeCount > 0) {
-                const D=res, P=D+2;
-                const fieldArr=new Float32Array(P*P*P).fill(1);
-                for(let z=0;z<D;z++){const pz=(z+0.5)/D;
-                    for(let y=0;y<D;y++){const py=(y+0.5)/D;
-                        for(let x=0;x<D;x++){
-                            if(sampleOccupancy((x+0.5)/D,py,pz)) fieldArr[(x+1)+(y+1)*P+(z+1)*P*P]=-1;
-                        }}}
-                const sn=surfaceNets(fieldArr,[P,P,P]);
-                if(sn.vertices.length>0){
-                    const sm=laplacianSmooth(sn.vertices,sn.quads,3,0.55);
-                    const nv=sm.length;
-                    skinPos=new Float32Array(nv*3);
-                    skinCol=new Float32Array(nv*3);
-                    for(let i=0;i<nv;i++){
-                        const u=(sm[i][0]-0.5)/D, vy=(sm[i][1]-0.5)/D, wz=(sm[i][2]-0.5)/D;
-                        skinPos[i*3]  = u*span - span/2;
-                        skinPos[i*3+1]= vy*span + shiftDown;
-                        skinPos[i*3+2]= wz*span - span/2;
-                        const cu=Math.max(0,Math.min(1,u)), cv=Math.max(0,Math.min(1,vy)), cw=Math.max(0,Math.min(1,wz));
-                        const idxF=Math.floor((1-cv)*(sdfF.h-1))*sdfF.w + Math.floor(cu*(sdfF.w-1));
-                        if (cfg.colorMode === 'source') {
-                            const pF=idxF*4;
-                            skinCol[i*3]  =sdfF.pixels[pF]/255.0;
-                            skinCol[i*3+1]=sdfF.pixels[pF+1]/255.0;
-                            skinCol[i*3+2]=sdfF.pixels[pF+2]/255.0;
-                        } else {
-                            const idxS=Math.floor((1-cv)*(sdfS.h-1))*sdfS.w + Math.floor(cw*(sdfS.w-1));
-                            const depthMap=Math.min(1.0,Math.sqrt(Math.max(sdfF.dist[idxF],sdfS.dist[idxS]))/15.0);
-                            const rgb=hslToRgb(0.55-depthMap*0.05,0.4,0.2+depthMap*0.5);
-                            skinCol[i*3]=rgb[0];skinCol[i*3+1]=rgb[1];skinCol[i*3+2]=rgb[2];
-                        }
-                    }
-                    skinIdx=new Uint32Array(sn.quads.length*6);
-                    let k=0;
-                    for(const q of sn.quads){skinIdx[k++]=q[0];skinIdx[k++]=q[1];skinIdx[k++]=q[2];skinIdx[k++]=q[0];skinIdx[k++]=q[2];skinIdx[k++]=q[3];}
-                }
-            }
-
             const fM=matrices.slice(0,activeCount*16),fC=colors.slice(0,activeCount*3);
             const out={type:'done',jobId,activeCount,time:performance.now()-t0,matrices:fM,colors:fC};
-            const transfers=[fM.buffer,fC.buffer];
-            if(skinPos&&skinIdx){out.skinPos=skinPos;out.skinIdx=skinIdx;out.skinCol=skinCol;transfers.push(skinPos.buffer,skinIdx.buffer,skinCol.buffer);}
-            self.postMessage(out,transfers);
+            self.postMessage(out,[fM.buffer,fC.buffer]);
         }
     };
 </script>
@@ -941,16 +971,16 @@ input[type="range"]:active::-webkit-slider-thumb {
     // proportional to a human body, not from making SPAN bigger —
     // a 90,000u world with 620u/s movement reads *smaller* because
     // you cross it like it's a pebble.
-    const SPAN        = 1600;
+    const SPAN        = 16000;
     const WORLD_FLOOR = 0;
-    const CAMERA_FAR  = 12000;
+    const CAMERA_FAR  = 120000;
     const BOUND       = SPAN * 1.5;   // roam room beyond the monument
     const PI_2        = Math.PI/2;
 
     // ── FORGE CFG — direct slider values, negative gap = seamless ──
     // (defaults MUST match the HTML slider values — synced at init)
     let CFG = {
-        resolution: 120,          // leaf = SPAN/res; 13.3u @120, 5.3u @ max 300
+        resolution: 120,          // leaf = SPAN/res = 12.5u; 10u at max 80
         threshold:  2,
         blockGap:   0,
         sculpt:     4,
@@ -966,11 +996,13 @@ input[type="range"]:active::-webkit-slider-thumb {
     // farthest from the structure's mean color get flagged, and each
     // beacon's pulse phase comes from a sine-hash of its own position.
     // ═══════════════════════════════════════════════════════════
-    const BEACON_FRAC    = 0.006;   // target fraction of total voxels
-    const BEACON_MIN     = 3;
-    const BEACON_MAX     = 40;
-    const BEACON_DISTMIN = 0.22;    // floor: nothing flagged if the palette is too flat
-    const BEACON_RANGE   = 45;      // proximity glow-boost radius, world units
+    const SCAN_DIV       = 7;       // monument divided into SCAN_DIV^3 cells
+    const SCAN_RAD_FRAC  = 0.42;    // scan radius as a fraction of the smallest cell edge
+    let   scanRadius     = 600;     // derived in buildCells — must stay under a half-cell
+                                    // or one visit bleeds into its neighbours for free
+    const SCAN_DWELL     = 1.1;     // seconds inside radius before it registers
+    const DECAY_INTERVAL = 95;      // seconds between void reclamations
+    const DECAY_MIN_COV  = 0.18;    // void won't start eating until you're this far in
 
     // ═══════════════════════════════════════════════════════════
     // [ODM] MOVEMENT — toomuch (ODM_CORE) physics model, tuned to
@@ -982,58 +1014,58 @@ input[type="range"]:active::-webkit-slider-thumb {
     // smokeBase < smokeMaxRate ordering.
     // ═══════════════════════════════════════════════════════════
     const M = {
-        gravity:      -60,    // ~2.2x real — snappy but proportional
-        airDrag:      0.03,
-        groundFric:   5,
-        accelGround:  23,     // terminal walk ≈ accel/fric ≈ 5 m/s
-        accelAir:     40,
-        boostAccel:   60,
-        boostCone:    0.6,
+        // ── FLIGHT CORE ──────────────────────────────────────────
+        // Left stick thrusts along camera-relative axes (6DOF).
+        // Gravity is subtle — a slow drift you overcome with any
+        // upward input. The craft has inertia; you point and commit.
+        flightThrust:  55,    // m/s² main engine — left stick forward
+        flightStrafe:  38,    // m/s² lateral / vertical thrust
+        flightGravity:  0,    // zero-g — pure space
+        pitchAuthority: 4.2,  // rad/s velocity bends toward look vector
+        yawAuthority:   3.8,  // rad/s horizontal steering
+        bankScale:      1.8,  // roll visual lean per rad/s of yaw rate
+        bankMax:        0.55, // max camera roll radians (≈31°)
+        bankRate:       0.12, // lerp rate toward target bank (dt-corrected)
+        airDrag:        0.018,// gentle — momentum carries between inputs
+        maxSpeed:       220,
+
+        // ── GRAPPLE (unchanged) ──────────────────────────────────
         hookPull:     90,
-        ropeNorm:     40,     // pull ramps up to 3x over this distance
-        maxRopeDist:  1400,    // half the span — climb in hops, feel the size
-        maxSpeed:     200,     // 288 km/h on the wire; span crossing ~10s
+        ropeNorm:     40,
+        maxRopeDist:  1400,
+        reelRate:     10,
+        ropeStiff:    0.85,
+        boostAccel:   80,     // grapple + full stick = slingshot
+        boostCone:    0.55,
+
+        // ── BODY ─────────────────────────────────────────────────
         radius:       0.35,
-        height:       0.9,    // half-height; full body 1.8u = 1.8m
+        height:       0.9,
+        tumbleThresh: 55,
+        tumbleTime:   0.7,
+        tumbleSpin:   8,
+        groundFric:   4,      // skid on surface contact
+        accelGround:  20,
 
-        // ── CONTROL FEEL ──
-        // Accel alone can't steer: pushing 40 m/s² sideways into a 100 m/s
-        // vector barely bends it, which is why fast flight felt like arguing
-        // with a truck. turnAuthority ROTATES the velocity vector toward the
-        // stick at a fixed rad/s and keeps the speed — that's the snap.
-        turnAuthority: 3.4,   // rad/s of steering at full stick (0 = old feel)
-        airTurnScale:  0.75,  // less bite in the air than on foot
-        brakeAccel:    75,    // stick against your heading = real brake
-        brakeCone:     0.35,  // how opposed the stick must be to count
-        brakeVertical: 1.6,   // braking also grabs air vertically
-        reelRate:      10,    // m/s the winch shortens the rope
-        ropeStiff:     0.85,  // 0 = spring (floaty) · 1 = taut rope, no stretch
-
-        eyeOffset:    0.72,   // eye at 1.62m from feet (0.9 + 0.72)
-        hFov:         75,
-        hFovMax:      85,
-        fovExpandRate:0.5,
-        fovRecoverRate:0.3,
-        stickSens:    0.06,
+        // ── CAMERA ───────────────────────────────────────────────
+        eyeOffset:    0.72,
+        hFov:         78,
+        hFovMax:      96,
+        fovExpandRate:0.55,
+        fovRecoverRate:0.28,
+        stickSens:    0.062,
         stickRadius:  95,
-        rollScale:    0.004,
-        rollMax:      0.22,
-        rollRate:     0.08,   // per-frame-at-60 lerp, now dt-corrected
 
-        // tumble (fumble on hard impact) — thresholds are m/s now
-        tumbleThresh: 45,
-        tumbleTime:   0.8,
-        tumbleSpin:   9,
-
-        smokeMax:     600,
-        smokeBase:    12,      // low-speed rate  (LOW)
-        smokeMaxRate: 90,     // top-speed rate  (HIGH)
-        smokeSize:    11.4,
-        faceRadius:   8,
-        lifeMin:      0.4,
-        lifeMax:      2.5,
-        upDrift:      0.5,
-        spread:       50,
+        // ── SMOKE ────────────────────────────────────────────────
+        smokeMax:     700,
+        smokeBase:    18,
+        smokeMaxRate: 110,
+        smokeSize:    10,
+        faceRadius:   7,
+        lifeMin:      0.35,
+        lifeMax:      2.2,
+        upDrift:      0.3,
+        spread:       40,
     };
 
     // ── SLIDER TABLES — one row each, generated + bound in one go ──
@@ -1041,25 +1073,20 @@ input[type="range"]:active::-webkit-slider-thumb {
     // low ↔ high. In meters / m/s / m/s² now, so the numbers mean
     // something: gravity 22 ≈ 2.2x earth, max speed 80 = 288 km/h.
     const MOVE_SLIDERS = [
-        { lbl:'gravity',     min:2,    max:60,  step:0.5,  get:()=>-M.gravity,      set:v=>M.gravity=-v },
-        { lbl:'ground accel',min:5,    max:120, step:1,    get:()=>M.accelGround,   set:v=>M.accelGround=v },
-        { lbl:'air accel',   min:0,    max:80,  step:1,    get:()=>M.accelAir,      set:v=>M.accelAir=v },
-        { lbl:'gas boost',   min:5,    max:200, step:1,    get:()=>M.boostAccel,    set:v=>M.boostAccel=v },
-        { lbl:'boost cone',  min:0,    max:1,   step:0.05, get:()=>M.boostCone,     set:v=>M.boostCone=v },
-        { lbl:'turn snap',   min:0,    max:10,  step:0.1,  get:()=>M.turnAuthority, set:v=>M.turnAuthority=v },
-        { lbl:'air turn',    min:0,    max:1,   step:0.05, get:()=>M.airTurnScale,  set:v=>M.airTurnScale=v },
-        { lbl:'brake',       min:0,    max:200, step:5,    get:()=>M.brakeAccel,    set:v=>M.brakeAccel=v },
-        { lbl:'brake cone',  min:0,    max:0.9, step:0.05, get:()=>M.brakeCone,     set:v=>M.brakeCone=v },
-        { lbl:'reel rate',   min:0,    max:60,  step:1,    get:()=>M.reelRate,      set:v=>M.reelRate=v },
-        { lbl:'rope stiff',  min:0,    max:1,   step:0.05, get:()=>M.ropeStiff,     set:v=>M.ropeStiff=v },
-        { lbl:'hook pull',   min:10,   max:300, step:5,    get:()=>M.hookPull,      set:v=>M.hookPull=v },
-        { lbl:'pull ramp',   min:10,   max:200, step:5,    get:()=>M.ropeNorm,      set:v=>M.ropeNorm=v },
-        { lbl:'rope reach',  min:50,   max:1200,step:10,   get:()=>M.maxRopeDist,   set:v=>M.maxRopeDist=v },
-        { lbl:'max speed',   min:5,    max:200, step:5,    get:()=>M.maxSpeed,      set:v=>M.maxSpeed=v },
-        { lbl:'air drag',    min:0,    max:0.3, step:0.005,get:()=>M.airDrag,       set:v=>M.airDrag=v },
-        { lbl:'ground fric', min:0,    max:20,  step:0.5,  get:()=>M.groundFric,    set:v=>M.groundFric=v },
-        { lbl:'body radius', min:0.15, max:1.5, step:0.05, get:()=>M.radius,        set:v=>M.radius=v },
-        { lbl:'ride height', min:0.3,  max:2,   step:0.05, get:()=>M.height,        set:v=>M.height=v },
+        { lbl:'thrust',       min:5,   max:180, step:1,    get:()=>M.flightThrust,    set:v=>M.flightThrust=v },
+        { lbl:'strafe',       min:5,   max:120, step:1,    get:()=>M.flightStrafe,    set:v=>M.flightStrafe=v },
+        { lbl:'flight gravity',min:0,  max:30,  step:0.5,  get:()=>M.flightGravity,   set:v=>M.flightGravity=v },
+        { lbl:'pitch snap',   min:0,   max:12,  step:0.1,  get:()=>M.pitchAuthority,  set:v=>M.pitchAuthority=v },
+        { lbl:'yaw snap',     min:0,   max:12,  step:0.1,  get:()=>M.yawAuthority,    set:v=>M.yawAuthority=v },
+        { lbl:'bank amount',  min:0,   max:5,   step:0.05, get:()=>M.bankScale,       set:v=>M.bankScale=v },
+        { lbl:'bank max',     min:0,   max:1.2, step:0.02, get:()=>M.bankMax,         set:v=>M.bankMax=v },
+        { lbl:'drag',         min:0,   max:0.15,step:0.002,get:()=>M.airDrag,         set:v=>M.airDrag=v },
+        { lbl:'max speed',    min:20,  max:400, step:5,    get:()=>M.maxSpeed,        set:v=>M.maxSpeed=v },
+        { lbl:'slingshot',    min:5,   max:200, step:5,    get:()=>M.boostAccel,      set:v=>M.boostAccel=v },
+        { lbl:'reel rate',    min:0,   max:60,  step:1,    get:()=>M.reelRate,        set:v=>M.reelRate=v },
+        { lbl:'rope stiff',   min:0,   max:1,   step:0.05, get:()=>M.ropeStiff,       set:v=>M.ropeStiff=v },
+        { lbl:'hook pull',    min:10,  max:300, step:5,    get:()=>M.hookPull,        set:v=>M.hookPull=v },
+        { lbl:'rope reach',   min:50,  max:1400,step:10,   get:()=>M.maxRopeDist,     set:v=>M.maxRopeDist=v },
     ];
     const CAM_SLIDERS = [
         { lbl:'eye offset',  min:0,    max:2,   step:0.02, get:()=>M.eyeOffset,     set:v=>M.eyeOffset=v },
@@ -1146,7 +1173,6 @@ input[type="range"]:active::-webkit-slider-thumb {
     // ── THREE SCENE ───────────────────────────────────────────────
     let scene, camera, renderer, controls;
     let instancedMesh, particleSystem, floorMesh;
-    let skinMesh=null, skinValid=false, SKIN_MODE='nets';   // 'nets' shows the surface skin, 'cubes' the classic voxels
     let walkCamera = null;
     let ambient, hemiLight, keyLight, fillLight, dustMat;   // hoisted for live atmosphere
 
@@ -1240,7 +1266,7 @@ input[type="range"]:active::-webkit-slider-thumb {
         if(scene.fog){
             scene.fog.color.copy(ATMOS.fogCol);
             // haze 1.0 → visibility ≈ one third of the span; 0 → crystal air
-            scene.fog.density = ATMOS.haze * 2.5 / SPAN;
+            scene.fog.density = ATMOS.haze * 5 / SPAN;
         }
         if(ambient)  ambient.intensity=ATMOS.ambient;
         if(keyLight){
@@ -1252,8 +1278,9 @@ input[type="range"]:active::-webkit-slider-thumb {
         if(hemiLight){ hemiLight.color.copy(ATMOS.skyBot); hemiLight.groundColor.copy(ATMOS.groundCol); }
         if(fillLight) fillLight.color.copy(ATMOS.skyTop);
         if(renderer) renderer.toneMappingExposure=ATMOS.exposure;
-        if(wxMat)   wxMat.opacity   = WX[WX_TYPE].opacity * ATMOS.wxAmount;
-        if(rainMat) rainMat.opacity = WX[WX_TYPE].opacity * ATMOS.wxAmount;
+        const wxg = weatherCycleGain();
+        if(wxMat)   wxMat.opacity   = WX[WX_TYPE].opacity * ATMOS.wxAmount * wxg;
+        if(rainMat) rainMat.opacity = WX[WX_TYPE].opacity * ATMOS.wxAmount * wxg;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1268,7 +1295,7 @@ input[type="range"]:active::-webkit-slider-thumb {
     const WX = {
         none:  { count:0,    fall:0,   drift:0,   size:0,   opacity:0,    col:0xFFFFFF, streak:0,    swirl:0 },
         rain:  { count:2600, fall:62,  drift:2.5, size:0,   opacity:0.5,  col:0xAEC4D2, streak:0.09, swirl:0 },
-        snow:  { count:1800, fall:5,   drift:1.4, size:2.6, opacity:0.9,  col:0xFFFFFF, streak:0,    swirl:0.7 },
+        snow:  { count:6, fall:5,   drift:1.4, size:2.6, opacity:0.9,  col:0xFFFFFF, streak:0,    swirl:0.7 },
         mist:  { count:900,  fall:0.4, drift:0.9, size:7,   opacity:0.16, col:0xC9D6DC, streak:0,    swirl:0.35 },
         ash:   { count:1400, fall:2.4, drift:1.7, size:1.9, opacity:0.55, col:0x8A8478, streak:0,    swirl:1.0 },
         ember: { count:700,  fall:-3.2,drift:2.0, size:2.3, opacity:0.85, col:0xFF7A33, streak:0,    swirl:1.5 },
@@ -1360,6 +1387,50 @@ input[type="range"]:active::-webkit-slider-thumb {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // WEATHER CYCLE — the pattern that gets broken
+    //
+    // Rain doesn't run flat-out forever; it swells and thins on a
+    // long deterministic cycle so you learn its rhythm without ever
+    // being told there is one. Then, once, it cuts out mid-cycle
+    // and stays out — a silence that arrives at the wrong time and
+    // has nothing to blame it on.
+    //
+    // Only ever happens if the mood actually has weather. Only once
+    // per session. The cycle resumes afterward as if nothing did.
+    // ═══════════════════════════════════════════════════════════
+    const WX_PERIOD    = 132;    // seconds per full swell→thin cycle
+    const WX_FLOOR     = 0.28;   // thinnest the storm gets normally
+    const WX_CUT_AFTER = 300;    // earliest the break may happen
+    const WX_CUT_DUR   = 26;     // how long the wrong silence lasts
+    let   _wxPhase = 0, _wxCut = false, _wxCutTimer = 0, _wxCutDone = false;
+
+    function stepWeatherCycle(dt){
+        if(!walkMode) return;
+        _wxPhase += dt;
+
+        if(_wxCutTimer > 0){
+            _wxCutTimer -= dt;
+            if(_wxCutTimer <= 0){ _wxCut = false; }
+            return;
+        }
+        // the break: mid-cycle, while the storm is at its heaviest,
+        // which is exactly when a stop is least explicable
+        if(!_wxCutDone && WX_TYPE!=='none' && _flightTime > WX_CUT_AFTER){
+            const swell = 0.5 + 0.5*Math.sin(_wxPhase*(Math.PI*2/WX_PERIOD));
+            if(swell > 0.93){
+                _wxCutDone = true; _wxCut = true; _wxCutTimer = WX_CUT_DUR;
+            }
+        }
+    }
+
+    // 0..1 multiplier applied on top of ATMOS.wxAmount
+    function weatherCycleGain(){
+        if(_wxCut) return 0;
+        const swell = 0.5 + 0.5*Math.sin(_wxPhase*(Math.PI*2/WX_PERIOD));
+        return WX_FLOOR + (1-WX_FLOOR)*swell;
+    }
+
     function updateWeather(dt){
         if(!wxPoints||wxCount===0||ATMOS.wxAmount<0.01) return;
         const w=WX[WX_TYPE];
@@ -1444,16 +1515,19 @@ input[type="range"]:active::-webkit-slider-thumb {
         if(player.tumble>0)return;
         player.tumble=M.tumbleTime*Math.min(2,impactSpeed/M.tumbleThresh);
         const sp=M.tumbleSpin*Math.min(2,impactSpeed/M.tumbleThresh);
-        player.tumbleVel.set((Math.random()-0.5)*sp,(Math.random()-0.5)*sp,(Math.random()-0.5)*sp*1.4);
+        player.tumbleVel.set(jitS()*sp,jitS()*sp,jitS()*sp*1.4);
         releaseGrapple();
         const fx=document.getElementById('tumble-fx'); if(fx)fx.classList.add('on');
         for(let i=0;i<24&&particles.length<M.smokeMax;i++)
-            emit(player.pos.clone(),normal.clone().multiplyScalar(6+Math.random()*10),0.8);
+            emit(player.pos.clone(),normal.clone().multiplyScalar(6+jit()*10),0.8);
     }
     let currentHFov = M.hFov;
     let simTime = 0;
-    let beacons = [];        // [{pos:Vector3, color:Color, phase, discovered}]
+    let cells = [];          // [{key,pos,voxIdx[],beaconPos,beaconCol,phase,state,dwell}]
+    let cellByKey = new Map();
     let beaconMesh = null;
+    let scannedCount = 0, occupiedCells = 0;
+    let _decayTimer = 0, _lastReclaimName = '';
     const _IDQ = new THREE.Quaternion();
     const _beaconM4 = new THREE.Matrix4();
     const _beaconScale = new THREE.Vector3();
@@ -1501,6 +1575,20 @@ input[type="range"]:active::-webkit-slider-thumb {
         whSpd:     document.getElementById('wh-spd'),
         whAlt:     document.getElementById('wh-alt'),
         whStatus:  document.getElementById('wh-status'),
+        whRope:    document.getElementById('wh-rope'),
+        whHeadDeg: document.getElementById('wh-heading-deg'),
+        whHeadInner:document.getElementById('wh-heading-inner'),
+        whProx:    document.getElementById('wh-proximity'),
+        whSpdBar:  document.getElementById('wh-speed-bar'),
+        whSpdFill: document.getElementById('wh-speed-fill'),
+        whSpdVal:  document.getElementById('wh-speed-val'),
+        whPitch:   document.getElementById('wh-pitch'),
+        whPitchNeedle:document.getElementById('wh-pitch-needle'),
+        entAlert:  document.getElementById('ent-alert'),
+        scanReadout:document.getElementById('scan-readout'),
+        scanPct:   document.getElementById('scan-pct'),
+        scanCells: document.getElementById('scan-cells'),
+        watchFlash:document.getElementById('watch-flash'),
         deck:      document.getElementById('ui-deck'),
     };
 
@@ -1647,14 +1735,7 @@ input[type="range"]:active::-webkit-slider-thumb {
         for(let s=0;s<n;s++){
             // Y
             player.pos.y+=player.vel.y*h;
-            if(player.pos.y-M.height<WORLD_FLOOR){          // world ground plane
-                const vImpact=-player.vel.y;
-                player.pos.y=WORLD_FLOOR+M.height;
-                if(player.vel.y<0){
-                    player.vel.y=0; player.grounded=true;
-                    if(vImpact>M.tumbleThresh*1.2)startTumble(vImpact,_bv.set(0,1,0));
-                }
-            }
+            // no floor — space environment
             if(mArr)resolveAxis(mArr,1);
             // X
             player.pos.x+=player.vel.x*h;
@@ -1706,10 +1787,7 @@ input[type="range"]:active::-webkit-slider-thumb {
             }
             t += step;
         }
-        if (ray.direction.y < 0) {                 // floor fallback, same height floorMesh sits at
-            const tFloor = (WORLD_FLOOR - 0.05 - ray.origin.y) / ray.direction.y;
-            if (tFloor > 0 && tFloor < maxDist) return ray.origin.clone().addScaledVector(ray.direction, tFloor);
-        }
+        // no floor fallback — space environment
         return null;
     }
 
@@ -1733,8 +1811,8 @@ input[type="range"]:active::-webkit-slider-thumb {
         flashGrab();
         // anchor impact puff
         for(let b=0;b<24&&particles.length<M.smokeMax;b++){
-            emit(pt.clone().add(new THREE.Vector3((Math.random()-0.5)*0.4,Math.random()*0.4,(Math.random()-0.5)*0.4)),
-                 new THREE.Vector3((Math.random()-0.5)*2.5,Math.random()*2+0.5,(Math.random()-0.5)*2.5), 1.1);
+            emit(pt.clone().add(new THREE.Vector3(jitS()*0.4,jit()*0.4,jitS()*0.4)),
+                 new THREE.Vector3(jitS()*2.5,jit()*2+0.5,jitS()*2.5), 1.1);
         }
     }
 
@@ -1759,6 +1837,12 @@ input[type="range"]:active::-webkit-slider-thumb {
     // ═══════════════════════════════════════════════════════════
     // [ODM] SMOKE TRAIL
     // ═══════════════════════════════════════════════════════════
+    // deterministic jitter — replaces every Math.random() in the
+    // particle/tumble paths. "random is lazy determinism."
+    let _jz = 0;
+    function jit(){ _jz++; const s=Math.sin(_jz*127.1+_jz*0.731*311.7)*43758.5453; return s-Math.floor(s); }
+    function jitS(){ return jit()-0.5; }
+
     function makeSmokeTex(){
         const cv=document.createElement('canvas'); cv.width=64; cv.height=64;
         const cx=cv.getContext('2d');
@@ -1788,14 +1872,14 @@ input[type="range"]:active::-webkit-slider-thumb {
 
     function emit(pos, vel, lifeMult){
         if(particles.length>=M.smokeMax)return;
-        const life=(M.lifeMin+Math.random()*(M.lifeMax-M.lifeMin))*(lifeMult||1);
+        const life=(M.lifeMin+jit()*(M.lifeMax-M.lifeMin))*(lifeMult||1);
         const sp=M.spread;
         particles.push({
             pos:pos.clone(),
             vel:new THREE.Vector3(
-                vel.x+(Math.random()-0.5)*sp*2,
-                vel.y+Math.random()*M.upDrift+(Math.random()-0.5)*sp,
-                vel.z+(Math.random()-0.5)*sp*2
+                vel.x+jitS()*sp*2,
+                vel.y+jit()*M.upDrift+jitS()*sp,
+                vel.z+jitS()*sp*2
             ),
             life, maxLife:life,
         });
@@ -1826,8 +1910,8 @@ input[type="range"]:active::-webkit-slider-thumb {
             if(behind.length()<0.001)behind.set(0,-1,0);
             while(pAccum>=1&&particles.length<M.smokeMax){
                 pAccum-=1;
-                emit(player.pos.clone().addScaledVector(behind,0.5+Math.random()*1.2),
-                     behind.clone().multiplyScalar(1+Math.random()*2));
+                emit(player.pos.clone().addScaledVector(behind,0.5+jit()*1.2),
+                     behind.clone().multiplyScalar(1+jit()*2));
             }
         }
 
@@ -1849,8 +1933,31 @@ input[type="range"]:active::-webkit-slider-thumb {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // [ODM] PHYSICS — Test_2 formulas verbatim, params from M
+    // [FLIGHT] PHYSICS — 6DOF craft, Arwing/drone hybrid
+    //
+    // Left stick: thrust in camera-relative space.
+    //   forward/back  → along camera look direction (6DOF, not XZ only)
+    //   left/right    → camera-right strafe
+    //   (up thrust via look direction — pitch nose up, push forward)
+    //
+    // Velocity bends toward the look direction each frame via
+    // pitchAuthority (vertical) and yawAuthority (horizontal).
+    // This is the "snap" that makes fast turns feel responsive
+    // without being instant. Drag is gentle so momentum carries.
+    //
+    // Gravity is a constant 6 m/s² down — barely felt at speed,
+    // obvious when you stop thrusting. Any upward look + thrust beats it.
+    //
+    // Grapple / rope / winch unchanged — right stick fires, momentum
+    // from a slingshot release carries into free flight naturally.
     // ═══════════════════════════════════════════════════════════
+
+    // reusable vectors — allocated once, never inside the loop
+    const _fwd   = new THREE.Vector3();
+    const _right = new THREE.Vector3();
+    const _up    = new THREE.Vector3();
+    const _camQ  = new THREE.Quaternion();
+
     function setHFov(hFovDeg){
         const cc=document.getElementById('canvas-container');
         const aspect=cc.clientWidth/cc.clientHeight;
@@ -1861,193 +1968,185 @@ input[type="range"]:active::-webkit-slider-thumb {
         walkCamera.updateProjectionMatrix();
     }
 
+    // yaw rate tracker for banking — smoothed over frames
+    let _prevYaw = 0;
+    let _yawRate = 0;
+
     function physics(dt){
-        if(dt<=0)return;
+        if(dt<=0) return;
 
-        // gravity
-        player.vel.y += M.gravity*dt;
+        const tumbling = player.tumble > 0;
+        const ctl = tumbling ? 0.12 : 1;
 
-        const tumbling=player.tumble>0;
-        const ctl=tumbling?0.15:1;   // control cut while fumbling
+        // ── CAMERA BASIS ─────────────────────────────────────────
+        // Extract the three axes of the camera in world space.
+        // These are what "forward", "right", "up" mean to the pilot.
+        walkCamera.getWorldQuaternion(_camQ);
+        _fwd.set(0,0,-1).applyQuaternion(_camQ);    // camera look direction
+        _right.set(1,0,0).applyQuaternion(_camQ);   // camera right
+        _up.set(0,1,0).applyQuaternion(_camQ);      // camera up
 
-        // movement from left stick
-        let mx=0,mz=0;
-        if(stickL.on){mx=stickL.dx;mz=stickL.dy;}
-        const mv=new THREE.Vector3(mx,0,mz);
-        const stickMag=Math.min(1,mv.length());
-        if(mv.lengthSq()>1)mv.normalize();
-        mv.applyAxisAngle(new THREE.Vector3(0,1,0),player.yaw);
+        // ── SUBTLE GRAVITY ───────────────────────────────────────
+        player.vel.y -= M.flightGravity * dt;
 
-        // terrain + state — grounded comes from last frame's collision pass
-        const ground=player.grounded;
-        const accel=(ground?M.accelGround:M.accelAir)*ctl;
+        // ── THRUST — 6DOF along camera axes ─────────────────────
+        if(stickL.on && !tumbling){
+            const lx = stickL.dx;   // left/right strafe
+            const ly = -stickL.dy;  // forward/back (stick up = forward)
 
-        player.vel.x+=mv.x*accel*dt;
-        player.vel.z+=mv.z*accel*dt;
-
-        // ── TURN AUTHORITY — steer, don't shove ───────────────────
-        // Rotate the horizontal velocity toward the stick at a fixed rad/s,
-        // preserving speed. Accel alone can never turn a fast vector in time;
-        // this is the difference between flying and being flung.
-        if(stickMag>0.05&&M.turnAuthority>0){
-            const hs=Math.hypot(player.vel.x,player.vel.z);
-            if(hs>0.5){
-                const cur=Math.atan2(player.vel.z,player.vel.x);
-                const want=Math.atan2(mv.z,mv.x);
-                const d=Math.atan2(Math.sin(want-cur),Math.cos(want-cur));
-                const rate=M.turnAuthority*stickMag*ctl*(ground?1:M.airTurnScale);
-                const turn=clamp(d,-rate*dt,rate*dt);
-                const na=cur+turn;
-                player.vel.x=Math.cos(na)*hs;
-                player.vel.z=Math.sin(na)*hs;
+            // forward thrust along full camera direction (includes pitch)
+            if(Math.abs(ly) > 0.04){
+                const thrust = ly * M.flightThrust * ctl;
+                player.vel.x += _fwd.x * thrust * dt;
+                player.vel.y += _fwd.y * thrust * dt;
+                player.vel.z += _fwd.z * thrust * dt;
+            }
+            // lateral strafe — XZ-projected camera right so pitched-down
+            // flight doesn't fling you vertically when you strafe
+            if(Math.abs(lx) > 0.04){
+                const strafe = lx * M.flightStrafe * ctl;
+                const rLen = Math.hypot(_right.x, _right.z) || 1;
+                player.vel.x += (_right.x / rLen) * strafe * dt;
+                player.vel.z += (_right.z / rLen) * strafe * dt;
             }
         }
 
-        // ── BRAKE — pull against your heading to actually stop ─────
-        // No new button: opposing your own velocity bleeds speed hard.
-        // Drag alone (0.085) can't arrest anything, which is most of why
-        // there was never a sense of authority.
-        if(stickMag>0.05&&M.brakeAccel>0&&!tumbling){
-            const hs=Math.hypot(player.vel.x,player.vel.z);
-            if(hs>0.5){
-                const align=(mv.x*player.vel.x+mv.z*player.vel.z)/hs;
-                if(align<-M.brakeCone){
-                    const bleed=M.brakeAccel*stickMag*(-align)*dt;
-                    const ns=Math.max(0,hs-bleed);
-                    const k=ns/hs;
-                    player.vel.x*=k; player.vel.z*=k;
-                    player.vel.y*=Math.exp(-M.brakeVertical*dt);
+        // ── VELOCITY STEERING ────────────────────────────────────
+        // Bend the velocity vector toward where you're looking.
+        // Pitch authority: vertical component of velocity rotates
+        // toward the camera's vertical projection.
+        // Yaw authority: horizontal component rotates toward camera's
+        // horizontal projection.
+        // Together they give the Arwing feel: committed but responsive.
+        if(!tumbling){
+            const spd = player.vel.length();
+            if(spd > 1.5){
+                // horizontal plane steering (yaw)
+                const hSpd = Math.hypot(player.vel.x, player.vel.z);
+                if(hSpd > 0.8){
+                    const curAng  = Math.atan2(player.vel.z, player.vel.x);
+                    const wantAng = Math.atan2(_fwd.z, _fwd.x);
+                    let delta = Math.atan2(Math.sin(wantAng-curAng), Math.cos(wantAng-curAng));
+                    const maxTurn = M.yawAuthority * dt;
+                    delta = Math.max(-maxTurn, Math.min(maxTurn, delta));
+                    const na = curAng + delta;
+                    player.vel.x = Math.cos(na) * hSpd;
+                    player.vel.z = Math.sin(na) * hSpd;
                 }
+                // vertical steering (pitch)
+                const targetVY = _fwd.y * spd * 0.7;
+                const dvY = (targetVY - player.vel.y) * M.pitchAuthority * dt;
+                player.vel.y += Math.max(-8*dt, Math.min(8*dt, dvY));
             }
         }
 
-        // roll from side speed (separated, stable)
-        const forward=new THREE.Vector3(-Math.sin(player.yaw),0,-Math.cos(player.yaw));
-        const right=new THREE.Vector3(forward.z,0,-forward.x);
-        const horizontalVel=new THREE.Vector3(player.vel.x,0,player.vel.z);
-        const sideSpeed=horizontalVel.dot(right);
-        const targetRoll=THREE.MathUtils.clamp(sideSpeed*M.rollScale,-M.rollMax,M.rollMax);
-        // dt-corrected: a raw 0.08 lerp leans twice as fast at 120fps as at 60
-        player.roll=THREE.MathUtils.lerp(player.roll,targetRoll,1-Math.pow(1-M.rollRate,dt*60));
-
-        // gas boost — forward cone on left stick (boostCone is a FLOAT 0–1)
-        player.boostIntensity=0;
-        if(stickL.on&&!tumbling){
-            const mag=Math.sqrt(stickL.dx*stickL.dx+stickL.dy*stickL.dy);
-            if(mag>0.05&&(-stickL.dy/mag)>M.boostCone)
-                player.boostIntensity=(-stickL.dy/mag)*mag;
+        // ── GRAPPLE PULL (unchanged) ─────────────────────────────
+        player.boostIntensity = 0;
+        if(stickL.on && !tumbling){
+            const mag = Math.sqrt(stickL.dx*stickL.dx + stickL.dy*stickL.dy);
+            if(mag > 0.05 && (-stickL.dy/mag) > M.boostCone)
+                player.boostIntensity = (-stickL.dy/mag)*mag;
         }
-        if(player.boostIntensity>0){
-            const fwd=new THREE.Vector3(); walkCamera.getWorldDirection(fwd);
-            player.vel.addScaledVector(fwd,M.boostAccel*player.boostIntensity*dt);
-        }
-        DOM.knobL.classList.toggle('boost',player.boostIntensity>0.05);
-
-        // grapple pull (pull ∝ dist/ropeNorm, ramp CAPPED at 3x —
-        // uncapped, a long rope multiplied hookPull by hundreds and
-        // single-frame velocity spikes punched through geometry)
         if(grapple.active){
-            const toA=new THREE.Vector3().subVectors(grapple.anchor,player.pos);
-            const dist=toA.length(); toA.normalize();
-            const ramp=Math.min(dist/M.ropeNorm,3);
-            player.vel.addScaledVector(toA,M.hookPull*ramp*dt);
-
-            // ── WINCH — the rope only ever shortens, and once taut it
-            // refuses to stretch: the receding velocity component gets
-            // removed. A spring suggests where you'll go; a rope decides.
-            if(grapple.len<=0||dist<grapple.len)grapple.len=dist;
-            if(M.reelRate>0)grapple.len=Math.max(2,grapple.len-M.reelRate*dt);
-            if(M.ropeStiff>0&&dist>grapple.len){
-                const closing=player.vel.dot(toA);      // <0 = moving away
-                if(closing<0)player.vel.addScaledVector(toA,-closing*M.ropeStiff);
+            const toA = new THREE.Vector3().subVectors(grapple.anchor, player.pos);
+            const dist = toA.length(); toA.normalize();
+            const ramp = Math.min(dist/M.ropeNorm, 3);
+            player.vel.addScaledVector(toA, M.hookPull*ramp*dt);
+            if(player.boostIntensity > 0)
+                player.vel.addScaledVector(_fwd, M.boostAccel*player.boostIntensity*dt);
+            if(grapple.len<=0||dist<grapple.len) grapple.len=dist;
+            if(M.reelRate>0) grapple.len=Math.max(2, grapple.len-M.reelRate*dt);
+            if(M.ropeStiff>0 && dist>grapple.len){
+                const closing=player.vel.dot(toA);
+                if(closing<0) player.vel.addScaledVector(toA,-closing*M.ropeStiff);
             }
             updateRope();
         }
 
-        // drag
-        player.vel.x*=Math.exp(-M.airDrag*dt);
-        player.vel.z*=Math.exp(-M.airDrag*dt);
-        player.vel.y*=Math.exp(-M.airDrag*0.12*dt);
+        // ── DRAG ─────────────────────────────────────────────────
+        const dragK = Math.exp(-M.airDrag * dt);
+        player.vel.x *= dragK;
+        player.vel.y *= dragK;
+        player.vel.z *= dragK;
 
-        // speed cap
-        const spd=player.vel.length();
-        if(spd>M.maxSpeed)player.vel.multiplyScalar(M.maxSpeed/spd);
+        // ── SPEED CAP ────────────────────────────────────────────
+        const spd = player.vel.length();
+        if(spd > M.maxSpeed) player.vel.multiplyScalar(M.maxSpeed/spd);
 
-        // swept move + solid collision (floors, walls, ceilings —
-        // substepped so nothing tunnels at any slider setting)
+        // ── COLLISION + MOVE ─────────────────────────────────────
         moveAndCollide(dt);
 
-        // ground friction once the collision pass confirms contact
+        // light surface friction when touching ground
         if(player.grounded){
-            player.vel.x*=Math.exp(-M.groundFric*dt);
-            player.vel.z*=Math.exp(-M.groundFric*dt);
+            player.vel.x *= Math.exp(-M.groundFric*dt);
+            player.vel.z *= Math.exp(-M.groundFric*dt);
         }
 
-        // camera welded to the head — NO smoothing. A lerped follow-cam
-        // lags the model, so the physics can be perfect and it still feels
-        // mushy: every input arrives late by the length of the lerp.
-        walkCamera.position.set(player.pos.x,player.pos.y+M.eyeOffset,player.pos.z);
+        // ── CAMERA POSITION ──────────────────────────────────────
+        walkCamera.position.set(player.pos.x, player.pos.y + M.eyeOffset, player.pos.z);
 
-        // tumble spin decays; camera inherits the spin
+        // ── TUMBLE SPIN ──────────────────────────────────────────
         if(tumbling){
-            player.tumble-=dt;
-            player.pitch+=player.tumbleVel.x*dt;
-            player.yaw  +=player.tumbleVel.y*dt;
-            player.roll +=player.tumbleVel.z*dt;
+            player.tumble -= dt;
+            player.pitch += player.tumbleVel.x*dt;
+            player.yaw   += player.tumbleVel.y*dt;
+            player.roll  += player.tumbleVel.z*dt;
             player.tumbleVel.multiplyScalar(Math.exp(-2.2*dt));
-            if(player.tumble<=0){
-                player.tumble=0;
-                player.pitch=THREE.MathUtils.clamp(((player.pitch+Math.PI)%(2*Math.PI))-Math.PI,-PI_2,PI_2);
-                player.roll=player.roll%(2*Math.PI);
+            if(player.tumble <= 0){
+                player.tumble = 0;
+                player.pitch = THREE.MathUtils.clamp(
+                    ((player.pitch+Math.PI)%(2*Math.PI))-Math.PI, -PI_2, PI_2);
+                player.roll = player.roll%(2*Math.PI);
                 const fx=document.getElementById('tumble-fx'); if(fx)fx.classList.remove('on');
             }
         }
-        walkCamera.rotation.y=player.yaw;
-        walkCamera.rotation.x=player.pitch;
-        walkCamera.rotation.z=-player.roll;
 
-        // right stick look + momentum on release (locked while tumbling)
-        // dt-scaled: this was applied PER FRAME, so look speed rode on
-        // framerate — the same flick turned twice as far at 120fps as at 60,
-        // and drifted every time the frame budget wobbled. Nothing feels
-        // less "in control" than a camera whose gain changes under load.
-        const look=M.stickSens*dt*60;
-        if(stickR.on&&!tumbling){
-            player.yaw  -=stickR.dx*look;
-            player.pitch-=stickR.dy*look;
-            player.pitch=Math.max(-PI_2,Math.min(PI_2,player.pitch));
+        // ── LOOK (right stick) ───────────────────────────────────
+        const look = M.stickSens * dt * 60;
+        if(stickR.on && !tumbling){
+            player.yaw   -= stickR.dx * look;
+            player.pitch -= stickR.dy * look;
+            // pitch unclamped — full 360° loops
         } else if(!tumbling){
-            const m=Math.abs(stickR.momX)+Math.abs(stickR.momY);
-            if(m>0.0005){
-                const fd=Math.exp(-M.groundFric*dt);
+            const m = Math.abs(stickR.momX)+Math.abs(stickR.momY);
+            if(m > 0.0005){
+                const fd = Math.exp(-4.5*dt);
                 stickR.momX*=fd; stickR.momY*=fd;
-                player.yaw  -=stickR.momX*look;
-                player.pitch-=stickR.momY*look;
-                player.pitch=Math.max(-PI_2,Math.min(PI_2,player.pitch));
-            } else {stickR.momX=0;stickR.momY=0;}
+                player.yaw   -= stickR.momX*look;
+                player.pitch -= stickR.momY*look;
+                // pitch unclamped — full 360° loops
+            } else { stickR.momX=0; stickR.momY=0; }
         }
 
-        // FOV breathe — horizontal FOV, consistent portrait & landscape
-        const targetHFov=M.hFov+Math.min(M.hFovMax-M.hFov,spd*(M.hFovMax-M.hFov)/M.maxSpeed*1.4);
-        const fovRate=currentHFov<targetHFov?M.fovExpandRate:M.fovRecoverRate;
-        currentHFov+=(targetHFov-currentHFov)*(1-Math.pow(1-Math.min(0.999,fovRate),dt*60));
+        // ── BANKING ROLL — yaw-rate driven ───────────────────────
+        // Measure how fast we're yawing this frame, smooth it,
+        // then tilt the camera into the turn like an Arwing.
+        const rawYawRate = (player.yaw - _prevYaw) / Math.max(dt, 0.001);
+        _prevYaw = player.yaw;
+        // smooth the rate so micro-jitter doesn't strobe the bank
+        _yawRate += (rawYawRate - _yawRate) * (1 - Math.pow(1-0.18, dt*60));
+        const targetBank = THREE.MathUtils.clamp(_yawRate * M.bankScale, -M.bankMax, M.bankMax);
+        player.roll = THREE.MathUtils.lerp(player.roll, targetBank,
+            1 - Math.pow(1 - M.bankRate, dt*60));
+
+        walkCamera.rotation.order = 'YXZ';
+        walkCamera.rotation.y = player.yaw;
+        walkCamera.rotation.x = player.pitch;
+        walkCamera.rotation.z = player.roll;
+
+        // ── FOV BREATHE ──────────────────────────────────────────
+        const spdNow = player.vel.length();
+        const targetHFov = M.hFov + Math.min(M.hFovMax-M.hFov,
+            spdNow*(M.hFovMax-M.hFov)/M.maxSpeed*1.4);
+        const fovRate = currentHFov < targetHFov ? M.fovExpandRate : M.fovRecoverRate;
+        currentHFov += (targetHFov-currentHFov)*(1-Math.pow(1-Math.min(0.999,fovRate),dt*60));
         setHFov(currentHFov);
 
-        // HUD (throttled) — alt = feet height above whatever is below them
+        // ── HUD (throttled) ──────────────────────────────────────
         hudTick++;
-        if(hudTick%8===0){
-            const feet=player.pos.y-M.height;
-            const alt=feet-sampleGroundBelow(player.pos.x,player.pos.z,feet+0.1);
-            DOM.whPos.textContent=`${player.pos.x.toFixed(0)},${player.pos.y.toFixed(0)},${player.pos.z.toFixed(0)}`;
-            DOM.whSpd.textContent=spd.toFixed(1);
-            DOM.whAlt.textContent=alt.toFixed(1);
-            DOM.whStatus.textContent=
-                tumbling?'!! tumbling !!':player.boostIntensity>0.05?'boost':grapple.active?'anchored':player.grounded?'grounded':'air';
-        }
-
-        if(hudTick%3===0)scanHit();   // throttled: full instanced raycast is heavy
+        if(hudTick%6===0) updateFlightHUD(spdNow, tumbling);
+        if(hudTick%3===0) scanHit();
     }
-
     // ── STICK HELPER (verbatim) ───────────────────────────────────
     function normStick(rawDx,rawDy){
         const R=M.stickRadius;
@@ -2139,7 +2238,7 @@ input[type="range"]:active::-webkit-slider-thumb {
     function spawnPlayer(){
         // 160u back from the monument's edge, feet on the ground —
         // it should fill the sky the moment wander mode kicks in
-        player.pos.set(0, WORLD_FLOOR+M.height+0.05, SPAN*0.7);
+        player.pos.set(0, SPAN*0.4, SPAN*0.7);   // start mid-height, outside structure
         player.vel.set(0,0,0);
         player.grounded=false;
         player.yaw=0; player.pitch=0; player.roll=0;
@@ -2159,11 +2258,14 @@ input[type="range"]:active::-webkit-slider-thumb {
             DOM.crosshair.style.display='block';
             DOM.joyL.style.display='block';
             DOM.joyR.style.display='block';
+            showSideInstruments(true);
             DOM.btnWalk.classList.add('walk-on');
             DOM.btnWalk.textContent='o r b i t';
             DOM.deck.classList.add('collapsed');
             if(DOM.modeStr)DOM.modeStr.innerText='o d m';
             currentHFov=M.hFov; setHFov(currentHFov);
+            if(DOM.scanReadout) DOM.scanReadout.style.display='block';
+            updateScanHUD();
             showToast('. . . o d m   a c t i v e . . .', 4000);
         } else {
             controls.enabled=true;
@@ -2172,10 +2274,12 @@ input[type="range"]:active::-webkit-slider-thumb {
             DOM.crosshair.style.display='none';
             DOM.joyL.style.display='none';
             DOM.joyR.style.display='none';
+            showSideInstruments(false);
             DOM.btnWalk.classList.remove('walk-on');
             DOM.btnWalk.textContent='w a n d e r';
             DOM.deck.classList.remove('collapsed','peek');
             if(DOM.modeStr)DOM.modeStr.innerText='o r b i t';
+            if(DOM.scanReadout) DOM.scanReadout.style.display='none';
             releaseGrapple();
             showToast('. . . o r b i t &nbsp; e n g a g e d . . .');
         }
@@ -2204,10 +2308,8 @@ input[type="range"]:active::-webkit-slider-thumb {
             const s=DOM.state; if(s)s.classList.remove('forming');
             if(msg.activeCount>0){
                 applyVoxelBuffers(msg.matrices, msg.colors, msg.matrices.length/16);
-                applySkin(msg);
             } else {
                 if(instancedMesh)instancedMesh.count=0;
-                clearSkin();
                 if(s)s.innerText='e m p t y';
             }
             if(DOM.vox)DOM.vox.innerText=msg.activeCount.toLocaleString();
@@ -2312,7 +2414,6 @@ input[type="range"]:active::-webkit-slider-thumb {
         }
 
         applyVoxelBuffers(mArr, cArr, count);
-        clearSkin();   // pipe loads have no skin data — show the real cubes, not a stale surface
         meshLoaded = true;
         currentJobId++;   // orphan any worker build still in flight
         showToast('. . . ' + count.toLocaleString() + ' voxels from mesh . . .');
@@ -2322,14 +2423,14 @@ input[type="range"]:active::-webkit-slider-thumb {
     function applyVoxelBuffers(mArr, cArr, count){
         if(!instancedMesh){
             const g=new THREE.BoxGeometry(1,1,1);
-            const m=new THREE.MeshStandardMaterial({roughness:0.1,metalness:0.2,flatShading:true,transparent:true,opacity:.99});
+            const m=new THREE.MeshStandardMaterial({roughness:0.5,metalness:0.7,flatShading:true,transparent:true,opacity:.9});
             instancedMesh=new THREE.InstancedMesh(g,m,count);
             scene.add(instancedMesh);
         } else if(count > instancedMesh.instanceMatrix.count){
             scene.remove(instancedMesh);
             instancedMesh.geometry.dispose();
             const g=new THREE.BoxGeometry(1,1,1);
-            const m=new THREE.MeshStandardMaterial({roughness:0.1,metalness:0.2,flatShading:true,transparent:true,opacity:.99});
+            const m=new THREE.MeshStandardMaterial({roughness:0.1,metalness:0.7,flatShading:true,transparent:true,opacity:.99});
             instancedMesh=new THREE.InstancedMesh(g,m,count);
             scene.add(instancedMesh);
         }
@@ -2342,120 +2443,176 @@ input[type="range"]:active::-webkit-slider-thumb {
         if(hullMode) buildHullFromVoxels();
         if(DOM.vox)DOM.vox.innerText=count.toLocaleString();
         const st=DOM.state; if(st){ st.classList.remove('forming'); st.innerText='q u i e t'; }
-        computeBeacons(mArr, cArr, count);
+        buildCells(mArr, cArr, count);
+        spawnEntitiesFromVoxels();
     }
 
-    // ═══ BEACONS — see CFG block above for the rules ═══
+    // ═══════════════════════════════════════════════════════════
+    // [SCAN] COVERAGE — the only thing you own
+    //
+    // The monument is divided into SCAN_DIV^3 cells. Cells that hold
+    // no voxels don't exist. Fly within SCAN_RADIUS of a live cell and
+    // hold it for SCAN_DWELL seconds and it registers — a beacon lights
+    // at that cell's most chromatically distinct voxel.
+    //
+    // The beacon is not a prompt. It is a mark you made. Nothing pulls
+    // at you, nothing pings. The only signal is the coverage number
+    // and the lights you left behind.
+    //
+    // The VOID takes them back. Every DECAY_INTERVAL it unmarks the
+    // cell FURTHEST from you — so the loss is always somewhere you
+    // thought you were finished with, and you have to go back.
+    // ═══════════════════════════════════════════════════════════
     function sineHash3(x,y,z){
         const s = Math.sin(x*12.9898 + y*78.233 + z*37.719) * 43758.5453;
         return s - Math.floor(s);
     }
 
-    function computeBeacons(mArr, cArr, count){
-        if(!count){ beacons=[]; buildBeaconMesh(); return; }
+    function buildCells(mArr, cArr, count){
+        cells=[]; cellByKey=new Map(); scannedCount=0; _decayTimer=0;
+        if(!count){ buildBeaconMesh(); updateScanHUD(); return; }
+
+        // bounds of the actual voxel mass, not the nominal SPAN
+        let x0=Infinity,y0=Infinity,z0=Infinity,x1=-Infinity,y1=-Infinity,z1=-Infinity;
+        for(let i=0;i<count;i++){
+            const b=i*16, x=mArr[b+12], y=mArr[b+13], z=mArr[b+14];
+            if(x<x0)x0=x; if(x>x1)x1=x;
+            if(y<y0)y0=y; if(y>y1)y1=y;
+            if(z<z0)z0=z; if(z>z1)z1=z;
+        }
+        const sx=Math.max(1e-3,(x1-x0)/SCAN_DIV), sy=Math.max(1e-3,(y1-y0)/SCAN_DIV), sz=Math.max(1e-3,(z1-z0)/SCAN_DIV);
+        scanRadius = Math.min(sx,sy,sz) * SCAN_RAD_FRAC;
+
+        // mean colour — used to pick each cell's standout voxel
         let mr=0,mg=0,mb=0;
         for(let i=0;i<count;i++){ mr+=cArr[i*3]; mg+=cArr[i*3+1]; mb+=cArr[i*3+2]; }
         mr/=count; mg/=count; mb/=count;
 
-        const scored = [];
         for(let i=0;i<count;i++){
-            const r=cArr[i*3], g=cArr[i*3+1], b=cArr[i*3+2];
-            const d = Math.hypot(r-mr, g-mg, b-mb);
-            if(d > BEACON_DISTMIN) scored.push({i, d});
+            const b=i*16;
+            const cx=Math.min(SCAN_DIV-1,Math.floor((mArr[b+12]-x0)/sx));
+            const cy=Math.min(SCAN_DIV-1,Math.floor((mArr[b+13]-y0)/sy));
+            const cz=Math.min(SCAN_DIV-1,Math.floor((mArr[b+14]-z0)/sz));
+            const key=cx+'|'+cy+'|'+cz;
+            let c=cellByKey.get(key);
+            if(!c){
+                c={ key, cx,cy,cz,
+                    pos:new THREE.Vector3(),
+                    n:0,
+                    bestI:-1, bestD:-1,
+                    beaconPos:new THREE.Vector3(),
+                    beaconCol:new THREE.Color(1,1,1),
+                    phase:0,
+                    scanned:false,
+                    dwell:0,
+                    lit:0 };          // 0..1 fade-in of the beacon
+                cellByKey.set(key,c); cells.push(c);
+            }
+            c.pos.x+=mArr[b+12]; c.pos.y+=mArr[b+13]; c.pos.z+=mArr[b+14]; c.n++;
+            const d=Math.hypot(cArr[i*3]-mr, cArr[i*3+1]-mg, cArr[i*3+2]-mb);
+            if(d>c.bestD){ c.bestD=d; c.bestI=i; }
         }
-        scored.sort((a,b)=>b.d-a.d);
-        const n = scored.length ? Math.max(BEACON_MIN, Math.min(BEACON_MAX, Math.round(count*BEACON_FRAC))) : 0;
-        const picked = scored.slice(0, Math.min(n, scored.length));
 
-        beacons = picked.map(({i})=>{
-            const b16=i*16;
-            const x=mArr[b16+12], y=mArr[b16+13], z=mArr[b16+14];
-            return {
-                pos: new THREE.Vector3(x,y,z),
-                color: new THREE.Color(cArr[i*3], cArr[i*3+1], cArr[i*3+2]),
-                phase: sineHash3(x*0.7, y*0.7, z*0.7) * Math.PI*2,
-                discovered: false,
-            };
-        });
-
+        for(const c of cells){
+            c.pos.multiplyScalar(1/c.n);
+            const b=c.bestI*16;
+            c.beaconPos.set(mArr[b+12],mArr[b+13],mArr[b+14]);
+            c.beaconCol.setRGB(cArr[c.bestI*3],cArr[c.bestI*3+1],cArr[c.bestI*3+2]);
+            c.phase = sineHash3(c.beaconPos.x*0.7,c.beaconPos.y*0.7,c.beaconPos.z*0.7)*Math.PI*2;
+        }
+        occupiedCells=cells.length;
         buildBeaconMesh();
-        if(beacons.length) showToast('. . . ' + beacons.length + ' beacon' + (beacons.length>1?'s':'') + ' found . . .');
+        updateScanHUD();
     }
 
     function buildBeaconMesh(){
         if(beaconMesh){ scene.remove(beaconMesh); beaconMesh.geometry.dispose(); beaconMesh.material.dispose(); beaconMesh=null; }
-        if(!beacons.length) return;
+        if(!cells.length) return;
         const g = new THREE.BoxGeometry(1,1,1);
         const m = new THREE.MeshBasicMaterial({vertexColors:true, transparent:true, opacity:0.95, blending:THREE.AdditiveBlending, depthWrite:false});
-        beaconMesh = new THREE.InstancedMesh(g, m, beacons.length);
-        const bc = new Float32Array(beacons.length*3);
-        const mat4 = new THREE.Matrix4();
-        for(let i=0;i<beacons.length;i++){
-            const bcn = beacons[i];
-            mat4.identity();
-            mat4.setPosition(bcn.pos);
-            beaconMesh.setMatrixAt(i, mat4);
-            bc[i*3]=bcn.color.r; bc[i*3+1]=bcn.color.g; bc[i*3+2]=bcn.color.b;
+        beaconMesh = new THREE.InstancedMesh(g, m, cells.length);
+        const bc = new Float32Array(cells.length*3);
+        for(let i=0;i<cells.length;i++){
+            bc[i*3]=cells[i].beaconCol.r; bc[i*3+1]=cells[i].beaconCol.g; bc[i*3+2]=cells[i].beaconCol.b;
         }
         beaconMesh.instanceColor = new THREE.InstancedBufferAttribute(bc,3);
         beaconMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        beaconMesh.frustumCulled=false;
         scene.add(beaconMesh);
     }
 
-    function updateBeacons(t){
-        if(!beaconMesh || !beacons.length) return;
-        const size = (SPAN/CFG.resolution) * (1 - CFG.blockGap);
+    // called every frame — marks cells, fades beacons, runs the void decay
+    function updateScan(dt, t){
+        if(!cells.length || !beaconMesh) return;
         const refPos = walkMode ? player.pos : (camera && camera.position);
-        for(let i=0;i<beacons.length;i++){
-            const bcn = beacons[i];
-            const pulse = 0.5 + 0.5*Math.sin(t*1.6 + bcn.phase);   // 0..1 slow breathing
-            let boost = 0;
-            if(refPos){
-                const dist = refPos.distanceTo(bcn.pos);
-                if(dist < BEACON_RANGE){
-                    boost = 1 - dist/BEACON_RANGE;
-                    if(boost>0.5 && !bcn.discovered){ bcn.discovered=true; showToast('. . . beacon acquired . . .', 1800); }
+        const r2 = scanRadius*scanRadius;
+        let changed=false;
+
+        for(const c of cells){
+            // ── dwell accumulation — only while actually flying ──
+            if(walkMode && refPos && !c.scanned){
+                if(refPos.distanceToSquared(c.pos) < r2){
+                    c.dwell += dt;
+                    if(c.dwell >= SCAN_DWELL){
+                        c.scanned=true; scannedCount++; changed=true;
+                    }
+                } else {
+                    c.dwell = Math.max(0, c.dwell - dt*0.6);   // partial credit bleeds off
                 }
             }
-            const s = size * (1.35 + 0.5*pulse + 0.9*boost);
+            // ── beacon fade — earned lights ease in, reclaimed ones ease out ──
+            const target = c.scanned ? 1 : 0;
+            c.lit += (target - c.lit) * (1 - Math.exp(-dt*1.4));
+        }
+
+        // ── VOID RECLAMATION ──────────────────────────────────────
+        // Only once you're invested. Takes the furthest cell so the
+        // hole is always behind you, never convenient.
+        if(walkMode && refPos && occupiedCells>0 && scannedCount/occupiedCells >= DECAY_MIN_COV){
+            _decayTimer += dt;
+            if(_decayTimer >= DECAY_INTERVAL){
+                _decayTimer = 0;
+                let far=null, fd=-1;
+                for(const c of cells){
+                    if(!c.scanned) continue;
+                    const d=refPos.distanceToSquared(c.pos);
+                    if(d>fd){ fd=d; far=c; }
+                }
+                if(far){
+                    far.scanned=false; far.dwell=0; scannedCount--; changed=true;
+                    triggerReclaim(far);
+                }
+            }
+        }
+
+        // ── write instance matrices ──
+        const size = (SPAN/CFG.resolution) * (1 - CFG.blockGap);
+        for(let i=0;i<cells.length;i++){
+            const c=cells[i];
+            let s;
+            if(c.lit < 0.002){
+                s = 0;   // unscanned cells have NO beacon — nothing to nag you
+            } else {
+                const pulse = 0.5 + 0.5*Math.sin(t*0.55 + c.phase);   // slow, well under the old 1.6
+                s = size * c.lit * (2.2 + 0.7*pulse);
+            }
             _beaconScale.set(s,s,s);
-            _beaconM4.compose(bcn.pos, _IDQ, _beaconScale);
+            _beaconM4.compose(c.beaconPos, _IDQ, _beaconScale);
             beaconMesh.setMatrixAt(i, _beaconM4);
         }
         beaconMesh.instanceMatrix.needsUpdate = true;
+        if(changed) updateScanHUD();
     }
 
-    // ═══ SURFACE-NETS SKIN (visual only — cubes stay as collision) ═══
-    function updateSkinVis(){
-        if(hullMode){ if(skinMesh) skinMesh.visible=false; return; }   // hull owns the view while on
-        const nets = (SKIN_MODE==='nets') && skinValid && skinMesh;
-        if(skinMesh) skinMesh.visible = !!nets;
-        if(instancedMesh) instancedMesh.visible = !nets;
+    function updateScanHUD(){
+        if(!DOM.scanPct) return;
+        if(!occupiedCells){ DOM.scanPct.textContent='——'; return; }
+        const pct = (scannedCount/occupiedCells)*100;
+        DOM.scanPct.textContent = pct.toFixed(1)+'%';
+        DOM.scanPct.classList.toggle('complete', scannedCount===occupiedCells);
+        if(DOM.scanCells) DOM.scanCells.textContent = scannedCount+'/'+occupiedCells;
     }
-    function clearSkin(){
-        skinValid=false;
-        updateSkinVis();
-    }
-    function applySkin(msg){
-        if(!msg.skinPos || !msg.skinIdx || msg.skinPos.length===0){ clearSkin(); return; }
-        if(skinMesh){
-            scene.remove(skinMesh);
-            skinMesh.geometry.dispose();
-            skinMesh.material.dispose();
-            skinMesh=null;
-        }
-        const g=new THREE.BufferGeometry();
-        g.setAttribute('position', new THREE.BufferAttribute(msg.skinPos,3));
-        g.setAttribute('color', new THREE.BufferAttribute(msg.skinCol,3));
-        g.setIndex(new THREE.BufferAttribute(msg.skinIdx,1));
-        g.computeVertexNormals();
-        const m=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.55,metalness:0.15});
-        skinMesh=new THREE.Mesh(g,m);
-        skinMesh.frustumCulled=false;   // monument spans the world; never let culling blink it out
-        scene.add(skinMesh);
-        skinValid=true;
-        updateSkinVis();
-    }
+
 
     // ═══════════════════════════════════════════════════════════
     // [TAPE] REPLAY — ghosts of your own flights
@@ -2643,7 +2800,7 @@ input[type="range"]:active::-webkit-slider-thumb {
         const mat = new THREE.MeshStandardMaterial({
             color: 0xB8DDEF,
             roughness: 0.9,
-            metalness: 0.2,
+            metalness: 0.7,
             flatShading: true,
             wireframe: false,
             transparent: true,
@@ -2659,12 +2816,11 @@ input[type="range"]:active::-webkit-slider-thumb {
         if(on){
             buildHullFromVoxels();
             if(instancedMesh) instancedMesh.visible = false;
-            if(skinMesh) skinMesh.visible = false;   // hull replaces the monument view entirely
             DOM.btnHull.classList.add('active');
             showToast('. . . h u l l . . .');
         } else {
             if(hullMesh){ scene.remove(hullMesh); hullMesh.geometry.dispose(); hullMesh.material.dispose(); hullMesh = null; }
-            updateSkinVis();   // restore whichever skin mode is active (nets or cubes)
+            if(instancedMesh) instancedMesh.visible = true;
             DOM.btnHull.classList.remove('active');
             showToast('. . . v o x e l s . . .');
         }
@@ -2693,6 +2849,8 @@ input[type="range"]:active::-webkit-slider-thumb {
                 document.getElementById(`slot-${viewKey}`).classList.add('loaded');
                 updateWorkerImage(viewKey);
                 requestBuild();
+                // auto-scan atmosphere from forge image
+                atmosScanFromCanvas(ctxs[viewKey]);
                 showToast(`. . . ${viewKey} accepted . . .`);
             };
             img.src=ev.target.result;
@@ -2741,17 +2899,14 @@ input[type="range"]:active::-webkit-slider-thumb {
         fillLight.position.set(-0.3*SPAN,0.2*SPAN,-0.35*SPAN); scene.add(fillLight);
 
         // Floor plane (grapple-able) — dark gray, fully matte (no metal/gloss glare)
-        const floorMat=new THREE.MeshStandardMaterial({color:0x4E4C39,roughness:1,metalness:0});
-        floorMesh=new THREE.Mesh(new THREE.PlaneGeometry(SPAN*4,SPAN*4),floorMat);
-        floorMesh.rotation.x=-Math.PI/2;floorMesh.position.y=WORLD_FLOOR-0.05;   // 5cm under voxel bottoms: no z-fight, no visible pit
-        scene.add(floorMesh);
+        // floor removed — zero-g space environment
 
         // Grid — REMOVED. It z-fought the floor no matter the offset; the matte
         // floor reads fine on its own and collision/perf never used it.
 
         // Ambient dust motes — subtle, screen-constant, cool pale (not a sandstorm)
         const pCount=1200,pPos=new Float32Array(pCount*3);
-        for(let i=0;i<pCount;i++){pPos[i*3]=(Math.random()-.5)*SPAN;pPos[i*3+1]=Math.random()*SPAN*0.5;pPos[i*3+2]=(Math.random()-.5)*SPAN;}
+        for(let i=0;i<pCount;i++){pPos[i*3]=jitS()*SPAN;pPos[i*3+1]=jit()*SPAN*0.5;pPos[i*3+2]=jitS()*SPAN;}
         const dustGeo=new THREE.BufferGeometry();dustGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
         dustMat=new THREE.PointsMaterial({color:0xD8DEE2,size:2,transparent:true,opacity:0.22,depthWrite:false,sizeAttenuation:false});
         particleSystem=new THREE.Points(dustGeo,dustMat);
@@ -2784,6 +2939,7 @@ input[type="range"]:active::-webkit-slider-thumb {
         syncAtmosSliders=buildSliderColumn('atmos-sliders',ATMOS_SLIDERS);
         setMood('clear');
         document.querySelector('[data-wx="none"]').classList.add('active');
+        setupAtmosScan();
 
         // pipeline + replay
         const cf=document.getElementById('const-file');
@@ -2873,12 +3029,6 @@ input[type="range"]:active::-webkit-slider-thumb {
             document.getElementById('v-color').innerText=CFG.colorMode;
             requestBuild();
         });
-        document.getElementById('btn-skin').addEventListener('click',()=>{
-            SKIN_MODE = SKIN_MODE==='nets' ? 'cubes' : 'nets';
-            document.getElementById('v-skin').innerText=SKIN_MODE;
-            updateSkinVis();
-            showToast('. . . skin: ' + SKIN_MODE + ' . . .');
-        });
         DOM.btnRot.addEventListener('click',()=>{
             frictionEnabled=!frictionEnabled;
             DOM.btnRot.classList.toggle('active',frictionEnabled);
@@ -2918,8 +3068,11 @@ input[type="range"]:active::-webkit-slider-thumb {
         requestAnimationFrame(animate);
         const dt=Math.min(clock.getDelta(),0.05);
         simTime += dt;
-        updateBeacons(simTime);
+        updateScan(dt, simTime);
+        updateEntities(dt, simTime);
+        stepEntityHUDTimers(dt);
         stepAtmos(dt);
+        stepWeatherCycle(dt);
         updateWeather(dt);
         if(skyMesh){ const c=walkMode?walkCamera:camera; if(c) skyMesh.position.copy(c.position); }
         updateGhosts(dt);
@@ -2942,6 +3095,791 @@ input[type="range"]:active::-webkit-slider-thumb {
             if(particleSystem){particleSystem.rotation.y+=0.0002;particleSystem.rotation.x+=0.0001;}
             renderer.render(scene,camera);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // [ATMOS SCAN] IMAGE → ATMOSPHERE PIPELINE
+    // Extracts colour + luminance stats from any dropped image,
+    // maps them to ATMOS_T and picks the nearest weather type.
+    // Everything lands in ATMOS_T so the existing crossfade engine
+    // does the work — the atmosphere blooms in over moodFade seconds.
+    // ═══════════════════════════════════════════════════════════
+
+    function atmosScan(file){
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+            const cv = document.createElement('canvas');
+            // downsample for speed — 128px is plenty for colour stats
+            const S = 128;
+            cv.width = Math.min(img.width, S);
+            cv.height = Math.min(img.height, S);
+            const ctx = cv.getContext('2d');
+            ctx.drawImage(img, 0, 0, cv.width, cv.height);
+            URL.revokeObjectURL(url);
+            const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+            const n = cv.width * cv.height;
+
+            // ── per-pixel accumulation ──
+            let sumR=0, sumG=0, sumB=0, sumLum=0;
+            let sumSat=0, lumVals=[];
+            const hueBuckets = new Array(8).fill(0);
+            let totalColored = 0;
+
+            for(let i=0; i<d.length; i+=4){
+                const r=d[i]/255, g=d[i+1]/255, b=d[i+2]/255;
+                const lum = 0.299*r + 0.587*g + 0.114*b;
+                sumR+=r; sumG+=g; sumB+=b; sumLum+=lum;
+                lumVals.push(lum);
+                const mx=Math.max(r,g,b), mn=Math.min(r,g,b);
+                sumSat += mx>0 ? (mx-mn)/mx : 0;
+                const diff=mx-mn;
+                if(diff>0.12 && mx>0.1){
+                    let hh=0;
+                    if(mx===r) hh=((g-b)/diff*60+360)%360;
+                    else if(mx===g) hh=(b-r)/diff*60+120;
+                    else hh=(r-g)/diff*60+240;
+                    hueBuckets[Math.floor(hh/45)%8]++;
+                    totalColored++;
+                }
+            }
+
+            const avgR=sumR/n, avgG=sumG/n, avgB=sumB/n, avgLum=sumLum/n;
+            const avgSat=sumSat/n;
+
+            // contrast (normalised RMS)
+            let lumVar=0;
+            for(const l of lumVals) lumVar+=(l-avgLum)**2;
+            const contrast = Math.min(1, Math.sqrt(lumVar/n)/0.5);
+
+            // edge density (simple Sobel sample)
+            const W=cv.width, H=cv.height;
+            let edgeSum=0, edgeCount=0;
+            for(let y=1;y<H-1;y++) for(let x=1;x<W-1;x++){
+                const il=((y*W+(x-1))*4), ir=((y*W+(x+1))*4);
+                const it=(((y-1)*W+x)*4), ib=(((y+1)*W+x)*4);
+                const lx=(d[il]+d[il+1]+d[il+2])/(3*255);
+                const rx=(d[ir]+d[ir+1]+d[ir+2])/(3*255);
+                const ty=(d[it]+d[it+1]+d[it+2])/(3*255);
+                const by=(d[ib]+d[ib+1]+d[ib+2])/(3*255);
+                edgeSum+=Math.abs(rx-lx)+Math.abs(by-ty);
+                edgeCount++;
+            }
+            const edgeDensity = edgeSum/edgeCount/2;
+
+            // hue fractions
+            const hueLabels=['red','orange','yellow','green','cyan','blue','purple','magenta'];
+            const hueFrac={};
+            hueLabels.forEach((l,i)=> hueFrac[l] = totalColored ? hueBuckets[i]/totalColored : 0);
+            const warm = hueFrac.red+hueFrac.orange+hueFrac.yellow;
+            const cool = hueFrac.cyan+hueFrac.blue+hueFrac.purple;
+            const warmRatio = (warm+cool)>0 ? warm/(warm+cool) : 0.5;
+
+            // dominant colours (fast bucket)
+            const cmap={};
+            for(let i=0;i<d.length;i+=16){
+                const r=d[i]&0xE0, g=d[i+1]&0xE0, b=d[i+2]&0xE0;
+                const k=`${r},${g},${b}`; cmap[k]=(cmap[k]||0)+1;
+            }
+            const sorted=Object.entries(cmap).sort((a,b)=>b[1]-a[1]).slice(0,5);
+            const total=Object.values(cmap).reduce((s,v)=>s+v,0);
+            const domCols = sorted.map(([k,cnt])=>{
+                const [r,g,b]=k.split(',').map(Number);
+                return { r:r/255, g:g/255, b:b/255,
+                         hex:'#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join(''),
+                         w:cnt/total };
+            });
+
+            // ── WEATHER PICK ──────────────────────────────────────
+            // Rules read left-to-right; first match wins.
+            // Priority: dramatic reads beat neutral reads.
+            let wxPick='none';
+            if(avgLum < 0.12) {
+                wxPick = 'none';                         // near-black: void, no clutter
+            } else if(warmRatio > 0.62 && edgeDensity > 0.06) {
+                wxPick = 'ember';                        // fiery + busy
+            } else if(warmRatio > 0.55 && avgLum < 0.45) {
+                wxPick = 'ash';                          // warm but dark: smoky
+            } else if(cool > 0.35 && edgeDensity > 0.07) {
+                wxPick = 'rain';                         // cool + active
+            } else if(cool > 0.25 && avgLum > 0.55) {
+                wxPick = 'mist';                         // cool + bright: hazy
+            } else if(avgSat < 0.12 && contrast > 0.5) {
+                wxPick = 'snow';                         // desaturated high-contrast
+            } else if(edgeDensity < 0.03 && avgLum > 0.5) {
+                wxPick = 'none';                         // calm and bright: clear sky
+            }
+
+            // ── MOOD PICK (for the light preset base) ────────────
+            // We'll override most values, but starting from a mood
+            // means the sun position and ambient start somewhere sane.
+            let moodKey='clear';
+            if(avgLum < 0.15) moodKey='void';
+            else if(warmRatio > 0.58 && avgLum < 0.5) moodKey='dusk';
+            else if(cool > 0.3 && edgeDensity > 0.06) moodKey='storm';
+
+            // Apply base mood first (sets ATMOS_T to a coherent state)
+            setMood(moodKey);
+
+            // ── ATMOS_T OVERRIDE ─────────────────────────────────
+            // Now overwrite the specific values the image actually encodes.
+            // We keep the mood's sun angle/elevation since the image can't
+            // tell us where the sun IS — only what the light feels like.
+
+            // sky colours: dom[0] = sky bottom/horizon, dom[1] = sky top
+            if(domCols.length >= 1){
+                const c0 = domCols[0];
+                // lift very dark colours so the sky doesn't go black
+                const liftR = c0.r*0.6+0.1, liftG = c0.g*0.6+0.1, liftB = c0.b*0.6+0.18;
+                ATMOS_T.skyBot.setRGB(liftR, liftG, liftB);
+                ATMOS_T.fogCol.setRGB(liftR*0.85, liftG*0.85, liftB*0.85);
+            }
+            if(domCols.length >= 2){
+                const c1 = domCols[1];
+                const liftR = c1.r*0.45+0.06, liftG = c1.g*0.45+0.06, liftB = c1.b*0.55+0.1;
+                ATMOS_T.skyTop.setRGB(liftR, liftG, liftB);
+            }
+            if(domCols.length >= 3){
+                const c2 = domCols[2];
+                ATMOS_T.groundCol.setRGB(c2.r*0.4, c2.g*0.4, c2.b*0.4);
+            }
+
+            // ── SUN COLOUR — most saturated dominant colour ──────
+            // Scan all dominant colours for highest saturation;
+            // that's usually the light source or the chromatic
+            // heart of the image — perfect as sunCol.
+            let bestSat = -1, sunSrc = domCols[0];
+            for(const c of domCols){
+                const mx=Math.max(c.r,c.g,c.b), mn=Math.min(c.r,c.g,c.b);
+                const sat = mx>0 ? (mx-mn)/mx : 0;
+                if(sat > bestSat){ bestSat=sat; sunSrc=c; }
+            }
+            // blend toward white so we don't get black-sun situations
+            const sunBlend = 0.55 + warmRatio*0.2;
+            ATMOS_T.sunCol.setRGB(
+                sunSrc.r*sunBlend + (1-sunBlend),
+                sunSrc.g*sunBlend + (1-sunBlend),
+                sunSrc.b*sunBlend + (1-sunBlend)
+            );
+
+            // ── GROUND COLOUR — deep palette, richer weight ───────
+            // dom3/4 are the darker/rarer tones — often earth, shadow.
+            // Use them at higher weight so the hemisphere ground bounce
+            // actually tints the underside of voxels with the image feel.
+            if(domCols.length >= 4){
+                const c3=domCols[3];
+                ATMOS_T.groundCol.setRGB(
+                    c3.r*0.75 + avgR*0.25,
+                    c3.g*0.75 + avgG*0.25,
+                    c3.b*0.75 + avgB*0.25
+                );
+            } else if(domCols.length >= 3){
+                const c2=domCols[2];
+                ATMOS_T.groundCol.setRGB(c2.r*0.7, c2.g*0.7, c2.b*0.7);
+            }
+
+            // ── FOG — blend sky bot + sky top for depth ───────────
+            if(domCols.length >= 2){
+                const c0=domCols[0], c1=domCols[1];
+                ATMOS_T.fogCol.setRGB(
+                    (c0.r*0.6 + c1.r*0.4)*0.82,
+                    (c0.g*0.6 + c1.g*0.4)*0.82,
+                    (c0.b*0.6 + c1.b*0.4)*0.85
+                );
+            }
+
+            // scalars
+            ATMOS_T.sun     = 0.3 + avgLum * 1.1;
+            ATMOS_T.ambient = 0.25 + avgLum * 0.8;
+            ATMOS_T.haze    = 0.05 + edgeDensity * 1.2;
+            ATMOS_T.exposure= 0.8 + avgLum * 0.5;
+            ATMOS_T.wxAmount= wxPick==='none' ? 0 : 0.5 + avgSat*0.45;
+
+            // clamp everything sane
+            ATMOS_T.sun     = Math.min(1.8, ATMOS_T.sun);
+            ATMOS_T.ambient = Math.min(1.4, ATMOS_T.ambient);
+            ATMOS_T.haze    = Math.min(0.85, ATMOS_T.haze);
+            ATMOS_T.exposure= Math.min(1.8, ATMOS_T.exposure);
+
+            // weather type swap (density fades via wxAmount crossfade)
+            setWeather(wxPick);
+            if(wxPick!=='none'){
+                document.querySelectorAll('[data-wx]').forEach(x=>
+                    x.classList.toggle('active',x.dataset.wx===wxPick));
+            }
+
+            syncAtmosSliders();
+            renderScanResult({avgLum, contrast, avgSat, edgeDensity, warmRatio, wxPick, moodKey, domCols});
+            setEntityPalette(domCols);
+            showToast(`. . . atmos scan → ${moodKey} / ${wxPick} . . .`, 3000);
+        };
+        img.src = url;
+    }
+
+    function renderScanResult(s){
+        const el = document.getElementById('atmos-scan-result');
+        if(!el) return;
+        const pct = v => (v*100).toFixed(0)+'%';
+        const allSwatches = s.domCols.slice(0,5).map((c,i)=>
+            `<div class="atmos-swatch" style="background:${c.hex}" title="${['sky','sky top','ground','earth','accent'][i]} ${c.hex} ${pct(c.w)}"></div>`
+        ).join('');
+        el.innerHTML = `
+<div class="atmos-swatch-row">${allSwatches}</div>
+<div style="font-size:0.48rem;color:var(--text-dim);letter-spacing:1px;margin-bottom:3px">sky · sky · gnd · earth · sun</div>
+<div><span class="sr-key">mood </span><span class="sr-val">${s.moodKey}</span></div>
+<div><span class="sr-key">wx &nbsp;&nbsp;</span><span class="sr-val">${s.wxPick}</span></div>
+<div><span class="sr-key">luma </span><span class="sr-val">${pct(s.avgLum)}</span></div>
+<div><span class="sr-key">sat &nbsp;</span><span class="sr-val">${pct(s.avgSat)}</span></div>
+<div><span class="sr-key">edge </span><span class="sr-val">${pct(s.edgeDensity)}</span></div>
+<div><span class="sr-key">warm </span><span class="sr-val">${pct(s.warmRatio)}</span></div>`;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // [HUD] COCKPIT INSTRUMENTS
+    // Heading tape: 360° compass rendered as a scrolling string.
+    // Proximity: distance to nearest voxel cluster (broadphase).
+    // Speed bar: vertical fill on the left edge.
+    // Pitch ladder: tick marks on the right edge.
+    // ═══════════════════════════════════════════════════════════
+
+    // build the heading tape string once — repeated so wrapping works
+    const _TAPE_MARKS = (() => {
+        const dirs = ['N','','','','NE','','','','E','','','','SE','','','','S','','','','SW','','','','W','','','','NW','','',''];
+        let s = '';
+        for(let i=0;i<3;i++) dirs.forEach((d,j)=>{ s += d || (j%2===0?'·':' '); s += ' '; });
+        return s;
+    })();
+
+    // nearest voxel proximity check — sampled every 6 ticks
+    let _proxDist = Infinity;
+    function sampleProximity(){
+        if(!voxHash||!instancedMesh||instancedMesh.count===0){ _proxDist=Infinity; return; }
+        const mArr=instancedMesh.instanceMatrix.array;
+        const px=player.pos.x,py=player.pos.y,pz=player.pos.z;
+        let best=Infinity;
+        const R=400; // check radius — wide enough to catch approaching structure
+        forVoxelsInRect(px-R,px+R,pz-R,pz+R,(i)=>{
+            const idx=i*16,half=mArr[idx]/2;
+            const bx=mArr[idx+12],by=mArr[idx+13],bz=mArr[idx+14];
+            const dx=px-bx,dy=py-by,dz=pz-bz;
+            const d=Math.sqrt(dx*dx+dy*dy+dz*dz)-half*1.73;
+            if(d<best)best=d;
+        });
+        _proxDist=best;
+    }
+
+    function updateFlightHUD(spd, tumbling){
+        if(!walkCamera) return;
+
+        // ── heading ─────────────────────────────────────────────
+        // yaw in degrees, 0=north (+Z), clockwise
+        const yawDeg = ((-player.yaw * 180/Math.PI) % 360 + 360) % 360;
+        if(DOM.whHeadDeg) DOM.whHeadDeg.textContent = yawDeg.toFixed(0).padStart(3,'0')+'°';
+        // scroll the tape: each character ≈ 3°, tape is 120 chars wide
+        if(DOM.whHeadInner){
+            const offset = -(yawDeg / 360) * (_TAPE_MARKS.length/3) * 8;
+            DOM.whHeadInner.style.transform = `translateX(${offset % (_TAPE_MARKS.length/3*8)}px)`;
+            DOM.whHeadInner.textContent = _TAPE_MARKS;
+        }
+
+        // ── proximity ────────────────────────────────────────────
+        sampleProximity();
+        if(DOM.whProx){
+            if(_proxDist === Infinity){
+                DOM.whProx.textContent='';
+                DOM.whProx.className='';
+            } else {
+                const d=Math.round(_proxDist);
+                DOM.whProx.textContent=`⬡ ${d}u`;
+                DOM.whProx.className = d<80?'close':d<250?'near':'';
+            }
+        }
+
+        // ── speed bar ────────────────────────────────────────────
+        if(DOM.whSpdFill){
+            const pct = Math.min(100, spd/M.maxSpeed*100);
+            DOM.whSpdFill.style.height = pct+'%';
+        }
+        if(DOM.whSpdVal) DOM.whSpdVal.textContent = Math.round(spd);
+
+        // ── core stats ───────────────────────────────────────────
+        if(DOM.whPos) DOM.whPos.textContent=
+            `${player.pos.x.toFixed(0)},${player.pos.y.toFixed(0)},${player.pos.z.toFixed(0)}`;
+        if(DOM.whSpd) DOM.whSpd.textContent = spd.toFixed(0);
+
+        // altitude = distance to nearest surface below, or absolute Y in space
+        const alt = _proxDist < 800 ? _proxDist.toFixed(0) : player.pos.y.toFixed(0);
+        if(DOM.whAlt) DOM.whAlt.textContent = alt;
+
+        // rope length
+        if(DOM.whRope) DOM.whRope.textContent = grapple.active
+            ? grapple.len.toFixed(0)+'u' : '—';
+
+        // status
+        if(DOM.whStatus) DOM.whStatus.textContent =
+            tumbling ? '!! tumble !!' :
+            grapple.active ? 'anchored' :
+            _proxDist < 80 ? '! proximity !' :
+            'flight';
+    }
+
+    // ── show/hide side instruments when entering/leaving walk mode ──
+    function showSideInstruments(on){
+        const d = on ? 'flex' : 'none';
+        if(DOM.whSpdBar)      DOM.whSpdBar.style.display = d;
+        if(DOM.whPitch)       DOM.whPitch.style.display  = d;
+        if(DOM.whPitchNeedle) DOM.whPitchNeedle.style.display = d;
+    }
+
+
+    // ═══════════════════════════════════════════════════════════
+    // [ENTITIES] — four psyche-damage archetypes.
+    // All share the same mini convex hull body built from the
+    // image's dominant colour palette. Different state machines,
+    // same DNA as the monument you're flying through.
+    //
+    // WATCHER  — surface-perched, rotates to face you. Always.
+    // MIMIC    — shadows your offset. Freezes when observed.
+    //            When unobserved long enough: fires hook at player.
+    // VOID     — deep inside structure. Faint. Exists.
+    // ECHO     — replays your own TAPE buffer 30s behind you.
+    // ═══════════════════════════════════════════════════════════
+
+    let entities = [];          // all live entity objects
+    let entityHullGeo = null;   // shared geometry built from voxels
+    let _domColCache = [];      // dominant colours from last scan
+
+    // called by atmosScanFromCanvas so entities know the palette
+    function setEntityPalette(cols){ _domColCache = cols.slice(); }
+
+    // ── HULL GEOMETRY for entities ───────────────────────────────
+    // Sampled from every Nth voxel so it's cheap — entities are
+    // small, they don't need the full monument's point cloud.
+    function buildEntityHullGeo(){
+        if(!instancedMesh||instancedMesh.count===0) return null;
+        const mArr=instancedMesh.instanceMatrix.array, count=instancedMesh.count;
+        const pts=[], stride=Math.max(1,Math.floor(count/180));
+        for(let i=0;i<count;i+=stride)
+            pts.push(new THREE.Vector3(mArr[i*16+12],mArr[i*16+13],mArr[i*16+14]));
+        if(pts.length<4) return null;
+        try{
+            const geo = THREE.ConvexGeometry
+                ? new THREE.ConvexGeometry(pts)
+                : new THREE.IcosahedronGeometry(1,1);
+            // normalise to unit size — each entity scales independently
+            geo.computeBoundingSphere();
+            const r = geo.boundingSphere.radius||1;
+            geo.scale(1/r,1/r,1/r);
+            return geo;
+        } catch(e){ return new THREE.IcosahedronGeometry(1,1); }
+    }
+
+    // ── ENTITY MATERIAL from dominant colour ─────────────────────
+    function makeEntMat(colIdx, emissiveMult){
+        const c = _domColCache[colIdx%Math.max(1,_domColCache.length)];
+        const hex = c
+            ? new THREE.Color(c.r,c.g,c.b)
+            : new THREE.Color(0.4,0.5,0.6);
+        const em = hex.clone().multiplyScalar(emissiveMult||0.35);
+        return new THREE.MeshStandardMaterial({
+            color:hex, emissive:em,
+            roughness:0.35, metalness:0.8,
+            flatShading:true, transparent:true, opacity:0.88,
+            side:THREE.DoubleSide,
+        });
+    }
+
+    // ── SPAWN HELPERS ────────────────────────────────────────────
+    function makeEntityMesh(scale, colIdx, emMult){
+        if(!entityHullGeo) entityHullGeo=buildEntityHullGeo();
+        const geo = entityHullGeo||new THREE.IcosahedronGeometry(1,1);
+        const mesh = new THREE.Mesh(geo, makeEntMat(colIdx, emMult));
+        mesh.scale.setScalar(scale);
+        mesh.frustumCulled=false;
+        scene.add(mesh);
+        return mesh;
+    }
+
+
+    function sineHash2(a,b){
+        const s=Math.sin(a*127.1+b*311.7)*43758.5453;
+        return s-Math.floor(s);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // AROUSAL GOVERNOR
+    //
+    // The old build had five entities all pulsing all the time, so
+    // "something is happening" was the baseline — which means it
+    // stopped being an event. One entity may hold the floor at a
+    // time, and after it releases, NOTHING may trigger for
+    // SILENCE_FLOOR seconds. The world has to prove it can be quiet
+    // or the quiet means nothing.
+    // ═══════════════════════════════════════════════════════════
+    const SILENCE_FLOOR = 55;      // hard mute after any event
+    const WARMUP        = 70;      // dead calm when you first launch
+    let   _arousalHolder = null;   // entity currently allowed to act
+    let   _silenceTimer  = WARMUP;
+    let   _flightTime    = 0;
+
+    function arousalFree(){ return _arousalHolder===null && _silenceTimer<=0; }
+    function arousalClaim(ent){ if(!arousalFree()) return false; _arousalHolder=ent; return true; }
+    function arousalRelease(ent){
+        if(_arousalHolder===ent){ _arousalHolder=null; _silenceTimer=SILENCE_FLOOR; }
+    }
+    function stepArousal(dt){
+        if(!walkMode) return;
+        _flightTime += dt;
+        if(_silenceTimer>0) _silenceTimer=Math.max(0,_silenceTimer-dt);
+    }
+
+    // ── WATCHER ──────────────────────────────────────────────────
+    // Parks on a voxel surface. Never moves. Never pulses. It is
+    // architecture until you look straight at it, and it only gets
+    // to be an entity ONCE — after that it's scenery again forever.
+    const WATCH_SIZE  = 420;       // scaled for SPAN=16000; the old 28 was invisible
+    const WATCH_RANGE = 4200;
+
+    function spawnWatcher(){
+        const pos = deterministicSurfacePoint(entities.length*7+3);
+        const mesh = makeEntityMesh(WATCH_SIZE, 2, 0.2);
+        mesh.position.copy(pos);
+        const ent = { type:'watcher', mesh, pos:pos.clone(), fired:false };
+        entities.push(ent);
+        return ent;
+    }
+
+    function updateWatcher(ent, dt, t){
+        ent.mesh.lookAt(player.pos);
+        ent.mesh.scale.setScalar(WATCH_SIZE);   // static. no breathing.
+        if(ent.fired) return;                   // one-shot latch — never re-triggers
+
+        const toPlayer = new THREE.Vector3().subVectors(player.pos, ent.pos);
+        if(toPlayer.length() > WATCH_RANGE) return;
+        const camDir = new THREE.Vector3();
+        walkCamera.getWorldDirection(camDir);
+        if(camDir.dot(toPlayer.normalize()) > 0.86){
+            if(arousalClaim(ent)){
+                ent.fired = true;
+                triggerWatcherSpotted();
+                arousalRelease(ent);
+            }
+        }
+    }
+
+    // ── MIMIC ────────────────────────────────────────────────────
+    // Sits at the antipode and copies your orientation EXACTLY.
+    // That exactness is the point: it teaches you a rule.
+    //
+    // Once per session — after you've had long enough to learn the
+    // rule — it breaks it. For DEVIATE_DUR seconds it turns to face
+    // you instead of mirroring you. Then it goes back to mirroring
+    // and never deviates again.
+    const MIMIC_SIZE     = 330;
+    const DEVIATE_AFTER  = 240;    // seconds of flight before it's allowed
+    const DEVIATE_DUR    = 2.4;    // brief. you should doubt you saw it.
+
+    function spawnMimic(){
+        const antipode = new THREE.Vector3(-player.pos.x, player.pos.y, -player.pos.z);
+        const mesh = makeEntityMesh(MIMIC_SIZE, 1, 0.45);
+        mesh.position.copy(antipode);
+        mesh.rotation.order = 'YXZ';
+        const ent = { type:'mimic', mesh, anchor:antipode.clone(),
+                      deviated:false, devTimer:0 };
+        entities.push(ent);
+        return ent;
+    }
+
+    function updateMimic(ent, dt, t){
+        ent.mesh.position.copy(ent.anchor);
+        ent.mesh.scale.setScalar(MIMIC_SIZE);
+
+        // ── the one deviation ──
+        if(ent.devTimer > 0){
+            ent.devTimer -= dt;
+            ent.mesh.lookAt(player.pos);          // wrong. deliberately wrong.
+            if(ent.devTimer <= 0) arousalRelease(ent);
+            return;
+        }
+        if(!ent.deviated && _flightTime > DEVIATE_AFTER){
+            // only when you're actually looking at it — a rule break
+            // nobody witnesses is just a bug
+            const toM = new THREE.Vector3().subVectors(ent.anchor, player.pos).normalize();
+            const camDir = new THREE.Vector3();
+            walkCamera.getWorldDirection(camDir);
+            if(camDir.dot(toM) > 0.9 && arousalClaim(ent)){
+                ent.deviated = true;
+                ent.devTimer = DEVIATE_DUR;
+                return;
+            }
+        }
+
+        // ── the rule ──
+        ent.mesh.rotation.y = player.yaw;
+        ent.mesh.rotation.x = player.pitch;
+        ent.mesh.rotation.z = player.roll;
+    }
+
+    // ── VOID ─────────────────────────────────────────────────────
+    // Buried in the mass. Does not move, glow-pulse, or approach.
+    // Its entire presence is expressed through the scan decay in
+    // updateScan() — it takes coverage back. You never catch it
+    // doing anything. You just find the hole.
+    const VOID_SIZE = 520;
+
+    function spawnVoid(){
+        const pos = deterministicSurfacePoint(11);
+        const toCenter = new THREE.Vector3().subVectors(new THREE.Vector3(0,SPAN*0.3,0), pos).normalize();
+        pos.addScaledVector(toCenter, SPAN*0.07);
+        const mesh = makeEntityMesh(VOID_SIZE, 3, 0.8);
+        mesh.material.opacity = 0.45;
+        mesh.position.copy(pos);
+        const ent = { type:'void', mesh, pos:pos.clone() };
+        entities.push(ent);
+        return ent;
+    }
+
+    function updateVoid(ent, dt, t){
+        ent.mesh.scale.setScalar(VOID_SIZE);
+        ent.mesh.rotation.y += 0.00012 * dt * 60;   // barely. almost not.
+    }
+
+    // ── deterministic surface sampling (replaces Math.random) ────
+    function deterministicSurfacePoint(seed){
+        if(!instancedMesh||!instancedMesh.count) return new THREE.Vector3();
+        const mArr=instancedMesh.instanceMatrix.array;
+        const i=Math.floor(sineHash2(seed*1.7, seed*0.31+2.4)*instancedMesh.count) % instancedMesh.count;
+        return new THREE.Vector3(mArr[i*16+12],mArr[i*16+13],mArr[i*16+14]);
+    }
+
+    // ── ENTITY UPDATE LOOP ───────────────────────────────────────
+    function updateEntities(dt, t){
+        stepArousal(dt);
+        if(!walkMode) return;
+        for(const ent of entities){
+            switch(ent.type){
+                case 'watcher': updateWatcher(ent,dt,t); break;
+                case 'mimic':   updateMimic(ent,dt,t);   break;
+                case 'void':    updateVoid(ent,dt,t);    break;
+            }
+        }
+    }
+
+    function killAllEntities(){
+        for(const ent of entities){
+            scene.remove(ent.mesh);
+            ent.mesh.material.dispose();
+        }
+        entities=[];
+        _arousalHolder=null;
+        _silenceTimer=WARMUP;
+        _flightTime=0;
+    }
+
+    // ── SPAWN SET ────────────────────────────────────────────────
+    // Three. Not five. Each with one legible rule.
+    function spawnEntitiesFromVoxels(){
+        if(!instancedMesh||instancedMesh.count===0) return;
+        killAllEntities();
+        entityHullGeo=buildEntityHullGeo();
+        spawnWatcher();
+        spawnMimic();
+        spawnVoid();
+    }
+
+    // ── HUD EFFECTS ──────────────────────────────────────────────
+    // Only one effect survives: the watcher flash. Everything else
+    // (hook vignette, echo warning, entity roster readout) was noise
+    // that told you the world was busy. The world is not busy.
+    let _watchFlashTimer=0;
+
+    function triggerWatcherSpotted(){
+        if(!DOM.watchFlash) return;
+        DOM.watchFlash.classList.add('on');
+        _watchFlashTimer=1.4;
+    }
+
+    // Fired by updateScan when the void takes a cell back. No alarm,
+    // no vignette — one line of text, the way a system log would
+    // mention it. You have to already care for it to land.
+    function triggerReclaim(cell){
+        if(DOM.entAlert){
+            DOM.entAlert.textContent='— sector unmade —';
+            DOM.entAlert.style.display='block';
+            setTimeout(()=>{ if(DOM.entAlert) DOM.entAlert.style.display='none'; }, 3200);
+        }
+    }
+
+    function stepEntityHUDTimers(dt){
+        if(_watchFlashTimer>0){
+            _watchFlashTimer-=dt;
+            if(_watchFlashTimer<=0&&DOM.watchFlash)
+                DOM.watchFlash.classList.remove('on');
+        }
+    }
+
+    // ── scan directly from an already-drawn canvas context ──────
+    // Called automatically when a forge image loads — no extra
+    // drop needed. Averages all loaded views so the mood reflects
+    // the whole monument, not just the last upload.
+    const _scanAccum = { r:0, g:0, b:0, n:0 };   // running average across views
+
+    function atmosScanFromCanvas(ctx){
+        const w = ctx.canvas.width, h = ctx.canvas.height;
+        if(!w || !h) return;
+        const d = ctx.getImageData(0, 0, w, h).data;
+        const n = w * h;
+
+        let sumR=0,sumG=0,sumB=0,sumLum=0,sumSat=0;
+        let lumVals=[];
+        const hueBuckets = new Array(8).fill(0);
+        let totalColored=0, edgeSum=0, edgeCount=0;
+
+        for(let i=0;i<d.length;i+=4){
+            const r=d[i]/255,g=d[i+1]/255,b=d[i+2]/255;
+            const lum=0.299*r+0.587*g+0.114*b;
+            sumR+=r;sumG+=g;sumB+=b;sumLum+=lum;lumVals.push(lum);
+            const mx=Math.max(r,g,b),mn=Math.min(r,g,b);
+            sumSat+=mx>0?(mx-mn)/mx:0;
+            const diff=mx-mn;
+            if(diff>0.12&&mx>0.1){
+                let hh=0;
+                if(mx===r)hh=((g-b)/diff*60+360)%360;
+                else if(mx===g)hh=(b-r)/diff*60+120;
+                else hh=(r-g)/diff*60+240;
+                hueBuckets[Math.floor(hh/45)%8]++;
+                totalColored++;
+            }
+        }
+        // edge density
+        for(let y=1;y<h-1;y++) for(let x=1;x<w-1;x++){
+            const il=((y*w+(x-1))*4),ir=((y*w+(x+1))*4);
+            const it=(((y-1)*w+x)*4),ib=(((y+1)*w+x)*4);
+            const lx=(d[il]+d[il+1]+d[il+2])/(3*255);
+            const rx=(d[ir]+d[ir+1]+d[ir+2])/(3*255);
+            const ty=(d[it]+d[it+1]+d[it+2])/(3*255);
+            const by=(d[ib]+d[ib+1]+d[ib+2])/(3*255);
+            edgeSum+=Math.abs(rx-lx)+Math.abs(by-ty);
+            edgeCount++;
+        }
+
+        const avgR=sumR/n,avgG=sumG/n,avgB=sumB/n,avgLum=sumLum/n;
+        const avgSat=sumSat/n;
+        let lumVar=0; for(const l of lumVals)lumVar+=(l-avgLum)**2;
+        const contrast=Math.min(1,Math.sqrt(lumVar/n)/0.5);
+        const edgeDensity=edgeCount?edgeSum/edgeCount/2:0;
+
+        const hueLabels=['red','orange','yellow','green','cyan','blue','purple','magenta'];
+        const hueFrac={};
+        hueLabels.forEach((l,i)=>hueFrac[l]=totalColored?hueBuckets[i]/totalColored:0);
+        const warm=hueFrac.red+hueFrac.orange+hueFrac.yellow;
+        const cool=hueFrac.cyan+hueFrac.blue+hueFrac.purple;
+        const warmRatio=(warm+cool)>0?warm/(warm+cool):0.5;
+
+        // dominant colours
+        const cmap={};
+        for(let i=0;i<d.length;i+=16){
+            const r=d[i]&0xE0,g=d[i+1]&0xE0,b=d[i+2]&0xE0;
+            const k=`${r},${g},${b}`;cmap[k]=(cmap[k]||0)+1;
+        }
+        const total=Object.values(cmap).reduce((s,v)=>s+v,0);
+        const domCols=Object.entries(cmap).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,cnt])=>{
+            const [r,g,b]=k.split(',').map(Number);
+            return{r:r/255,g:g/255,b:b/255,
+                   hex:'#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join(''),
+                   w:cnt/total};
+        });
+
+        // weather pick
+        let wxPick='none';
+        if(avgLum<0.12) wxPick='none';
+        else if(warmRatio>0.62&&edgeDensity>0.06) wxPick='ember';
+        else if(warmRatio>0.55&&avgLum<0.45) wxPick='ash';
+        else if(cool>0.35&&edgeDensity>0.07) wxPick='rain';
+        else if(cool>0.25&&avgLum>0.55) wxPick='mist';
+        else if(avgSat<0.12&&contrast>0.5) wxPick='snow';
+        else if(edgeDensity<0.03&&avgLum>0.5) wxPick='none';
+
+        // mood pick
+        let moodKey='clear';
+        if(avgLum<0.15) moodKey='void';
+        else if(warmRatio>0.58&&avgLum<0.5) moodKey='dusk';
+        else if(cool>0.3&&edgeDensity>0.06) moodKey='storm';
+
+        setMood(moodKey);
+
+        // sky colours
+        if(domCols.length>=1){
+            const c0=domCols[0];
+            ATMOS_T.skyBot.setRGB(c0.r*0.6+0.1,c0.g*0.6+0.1,c0.b*0.6+0.18);
+        }
+        if(domCols.length>=2){
+            const c1=domCols[1];
+            ATMOS_T.skyTop.setRGB(c1.r*0.45+0.06,c1.g*0.45+0.06,c1.b*0.55+0.1);
+        }
+        // fog = blend of top + bot
+        if(domCols.length>=2){
+            const c0=domCols[0],c1=domCols[1];
+            ATMOS_T.fogCol.setRGB(
+                (c0.r*0.6+c1.r*0.4)*0.82,
+                (c0.g*0.6+c1.g*0.4)*0.82,
+                (c0.b*0.6+c1.b*0.4)*0.85
+            );
+        }
+        // ground = deep palette
+        if(domCols.length>=4){
+            const c3=domCols[3];
+            ATMOS_T.groundCol.setRGB(c3.r*0.75+avgR*0.25,c3.g*0.75+avgG*0.25,c3.b*0.75+avgB*0.25);
+        } else if(domCols.length>=3){
+            const c2=domCols[2];
+            ATMOS_T.groundCol.setRGB(c2.r*0.7,c2.g*0.7,c2.b*0.7);
+        }
+        // sun = most saturated colour
+        let bestSat=-1,sunSrc=domCols[0];
+        for(const c of domCols){
+            const mx=Math.max(c.r,c.g,c.b),mn=Math.min(c.r,c.g,c.b);
+            const sat=mx>0?(mx-mn)/mx:0;
+            if(sat>bestSat){bestSat=sat;sunSrc=c;}
+        }
+        const sb=0.55+warmRatio*0.2;
+        ATMOS_T.sunCol.setRGB(
+            Math.min(1,sunSrc.r*sb+(1-sb)),
+            Math.min(1,sunSrc.g*sb+(1-sb)),
+            Math.min(1,sunSrc.b*sb+(1-sb))
+        );
+
+        ATMOS_T.sun     =Math.min(1.8, 0.3+avgLum*1.1);
+        ATMOS_T.ambient =Math.min(1.4, 0.25+avgLum*0.8);
+        ATMOS_T.haze    =Math.min(0.85,0.05+edgeDensity*1.2);
+        ATMOS_T.exposure=Math.min(1.8, 0.8+avgLum*0.5);
+        ATMOS_T.wxAmount=wxPick==='none'?0:0.5+avgSat*0.45;
+
+        setWeather(wxPick);
+        if(wxPick!=='none')
+            document.querySelectorAll('[data-wx]').forEach(x=>
+                x.classList.toggle('active',x.dataset.wx===wxPick));
+
+        syncAtmosSliders();
+        renderScanResult({avgLum,contrast,avgSat,edgeDensity,warmRatio,wxPick,moodKey,domCols});
+        setEntityPalette(domCols);
+        showToast(`. . . atmos ← forge · ${moodKey} / ${wxPick} . . .`,2800);
+    }
+
+    function setupAtmosScan(){
+        const drop = document.getElementById('atmos-drop');
+        const inp  = document.getElementById('atmos-scan-file');
+        if(!drop||!inp) return;
+
+        inp.addEventListener('change', e=>{
+            if(e.target.files[0]) atmosScan(e.target.files[0]);
+            inp.value='';
+        });
+        drop.addEventListener('dragover', e=>{ e.preventDefault(); drop.classList.add('drag-over'); });
+        drop.addEventListener('dragleave', ()=> drop.classList.remove('drag-over'));
+        drop.addEventListener('drop', e=>{
+            e.preventDefault(); drop.classList.remove('drag-over');
+            if(e.dataTransfer.files[0]) atmosScan(e.dataTransfer.files[0]);
+        });
     }
 
     init();
