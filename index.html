@@ -66,7 +66,7 @@ html,body{
     white-space:nowrap; flex-shrink:0; display:inline-flex; align-items:center; text-transform:lowercase; }
 .btn.on, .btn.primary, .btn:active { background:rgba(143,43,51,0.25); border-color:#8F2B33; color:#062636; }
 .btn input{display:none;}
-#deck-body { display:flex; flex-direction:column; padding:6px 10px 10px; overflow-y:auto; max-height:30vh; touch-action:pan-y; }
+#deck-body { display:flex; flex-direction:column; padding:6px 10px 10px; overflow-y:auto; max-height:calc(30vh - 32px - env(safe-area-inset-bottom,0px)); touch-action:pan-y; }
 #deck-pull { position:fixed; left:5%; bottom:0; z-index:61; width:26px; height:22px; background:#EACCAF;
     border:1px solid #8F2B33; border-bottom:none; border-radius:6px 6px 0 0; display:flex; align-items:center;
     justify-content:center; cursor:pointer; box-shadow:0 -4px 12px rgba(0,0,0,0.4); transition:opacity 0.2s ease, transform 0.2s ease; }
@@ -151,7 +151,7 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
         <span id="hud-read"><b>forge</b> idle</span>
         <span id="hud-ctl"><button class="hud-btn" id="btn-reset-hud">reset</button></span>
     </div>
-    <div id="drop-hint">tap ui to load images: front, side, top, bottom</div>
+    <div id="drop-hint">load images: front, side, top, bottom</div>
     <div class="odm-joy" id="joyL"><span class="j-lbl">move · touch = wall jump</span><div class="odm-knob" id="knobL"></div></div>
     <div id="xhair"></div>
     <div id="xlbl"></div>
@@ -193,6 +193,8 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
         <div class="grid" id="g-light"></div>
         <div class="glbl">mimic</div>
         <div class="grid" id="g-mimic"></div>
+        <div class="glbl">impact</div>
+        <div class="grid" id="g-fx"></div>
         <div class="glbl">smoke</div>
         <div class="grid" id="g-smoke"></div>
         <div class="glbl">speed</div>
@@ -1050,7 +1052,7 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
         // smoke trail
         // mimics: evil twins driven by a brain that learns YOUR moves (MIMIC_LAB), not a reflection
         mimics:        1,     // how many twins (0-3); each samples its own next move from what it has learned of you
-        mimicScale:    40,    // body height, world units (trees run 150-1750 tall)
+        mimicScale:    55,    // body height, world units (trees run 150-1750 tall)
         mimicEvil:     1.0,   // 0 = your model exactly, 1 = the evil twin (complement colours, horns, ember eyes)
         showSelf:      1,     // show your own model in orbit view, where you last stood
         mimicBeat:     0.25,  // seconds per beat: one action per beat, yours and theirs
@@ -1082,6 +1084,16 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
         mb_copyRunLimit:      5,
         mb_turnThresh:        0.25,  // brain: body
         mb_pitchThresh:       0.25,
+        // impact: anime-protagonist feel (each fires from something you did)
+        fxPunch:       1.0,   // rope-cut launch: FOV kick + shake + speed lines, scaled by how far it was stretched (0 = off)
+        fxSpeedLines:  0.35,  // faint speed streaks at the edges when you're near top speed (0 = off)
+        fxHitStop:     0.06,  // seconds the world freezes on a WALL KICK (a kick gets half of this; the blade never slows time); 0 = off
+        fxSlowTail:    0.35,  // seconds the slow-motion tail lasts after the freeze
+        fxReveal:      1,     // 1 = the first time a twin is in range and in view, letterbox + slow-mo + zoom
+        fxRevealRange: 900,   // how close a twin must be for that, world units
+        fxRevealCool:  45,    // seconds before it can happen again
+        mimicGlow:     1.0,   // ember halo around each twin, visible through walls and from far away (0 = off)
+        mimicBeacon:   700,   // height of the thin ember pillar over each twin, world units (0 = off)
         smokeMax:      400,   // pool cap — additive sprites are fill-rate, not geometry
         smokeBase:     6,     // puffs/sec at low speed
         smokeMaxRate:  35,    // puffs/sec at top speed
@@ -1285,7 +1297,18 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
             {k:'mimicCeil', lbl:'twin ceiling', min:300, max:6000, step:100, fmt:v=>v.toFixed(0)},
             {k:'mimicCarve', lbl:'twin carves', min:0, max:1, step:1, fmt:v=>v?'on':'off'},
             {k:'mimicReach', lbl:'twin blade reach', min:50, max:3000, step:50, fmt:v=>v.toFixed(0)},
+            {k:'mimicGlow', lbl:'twin halo', min:0, max:3, step:0.1, fmt:v=>v?v.toFixed(1)+'×':'off'},
+            {k:'mimicBeacon', lbl:'twin beacon', min:0, max:3000, step:50, fmt:v=>v?v.toFixed(0):'off'},
             {k:'mimicSmoke', lbl:'twin smoke', min:0, max:4, step:0.1, fmt:v=>`${v.toFixed(1)}×`},
+        ],
+        'g-fx': [
+            {k:'fxPunch', lbl:'launch punch', min:0, max:2, step:0.05, fmt:v=>v?v.toFixed(2)+'×':'off'},
+            {k:'fxSpeedLines', lbl:'speed lines', min:0, max:1, step:0.05, fmt:v=>v?v.toFixed(2):'off'},
+            {k:'fxHitStop', lbl:'wall-kick stop', min:0, max:0.2, step:0.01, fmt:v=>v?(v*1000).toFixed(0)+' ms':'off'},
+            {k:'fxSlowTail', lbl:'slow-mo tail', min:0.05, max:1.2, step:0.05, fmt:v=>v.toFixed(2)+'s'},
+            {k:'fxReveal', lbl:'rival reveal', min:0, max:1, step:1, fmt:v=>v?'on':'off'},
+            {k:'fxRevealRange', lbl:'reveal range', min:200, max:3000, step:50, fmt:v=>v.toFixed(0)},
+            {k:'fxRevealCool', lbl:'reveal cooldown', min:5, max:180, step:5, fmt:v=>v.toFixed(0)+'s'},
         ],
         'g-smoke': [
             {k:'watchers',    lbl:'watchers',    min:0,  max:3,   step:1,   fmt:v=>v.toFixed(0), onSet:()=>syncWatchers()},
@@ -1344,6 +1367,7 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
     };
     const camTarget = new THREE.Vector3().copy(player.pos);
     let VIEW_MODE = 'orbit';                // 'orbit' | 'first'
+    let deckWasOpen = true;                 // deck state to restore when leaving first person
     let currentHFov = M.hFov;
 
     // ── sticks ──
@@ -1622,7 +1646,7 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
             const side = wall.nx*Math.cos(player.yaw) - wall.nz*Math.sin(player.yaw);
             targetRoll = -Math.sign(side)*M.wallTilt;
         }
-        player.roll = THREE.MathUtils.lerp(player.roll, targetRoll, 0.08);
+        player.roll = THREE.MathUtils.lerp(player.roll, targetRoll, 0.12);
 
         // forward-push cone → boost along look vector
         player.boostIntensity = 0;
@@ -1795,7 +1819,7 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
         player.vel.z += nz*M.wallJumpOut;
         player.vel.y += M.wallJumpUp;
         wall.on = false; wall.coyote = 0; wall.t = 0; wall.cool = 0.25;   // no instant re-grab of the same wall
-        noteBeat('wallJump');
+        noteBeat('wallJump'); fxHit(0.5);
         player.shake = Math.max(player.shake, 0.04);
         return true;
     }
@@ -1836,7 +1860,7 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
                               M.hFov + (M.hFovMax - M.hFov)*spdK*M.speedFov);
         const rate = want > currentHFov ? M.fovExpandRate : M.fovRecoverRate;
         currentHFov += (want - currentHFov)*Math.min(1, rate*dt*6);
-        camera.fov = fovFor(currentHFov);
+        camera.fov = fovFor(Math.max(25, currentHFov + fxFovAdd()));
         camera.updateProjectionMatrix();
         camera.updateMatrixWorld();      // the rope's hand point is read from this right after
     }
@@ -1910,7 +1934,7 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
     function fireForceBlade(angle, target){
         if(slashCD > 0) return false;
         slashCD = BLADE.cooldown;
-        noteBeat('carve');
+        noteBeat('carve');   // the blade never slows time
         const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
         const { geo, mat } = bladeAssets();
         const mesh = new THREE.Mesh(geo, mat);
@@ -2816,7 +2840,7 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
                 if(tapped){
                     if(grapple.active || grapple.flying || grapple.pendingRay){
                         ropeReqId++;                 // also cancels a shot still in flight to the worker
-                        noteBeat('release'); releaseGrapple(); toast('rope cut');
+                        noteBeat('release'); fxLaunch(); releaseGrapple(); toast('rope cut');
                     } else if(ROPE_ENABLED) fireGrapple();
                 }
                 stickR.momX = tapped ? 0 : stickR.dx; stickR.momY = tapped ? 0 : stickR.dy;
@@ -3548,8 +3572,10 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
         document.getElementById('btn-defaults').addEventListener('click', clearSettings);
         paintAuto(); paintPrev();
 
-        // DRIFT deck: hidden by default; the UI tab opens it, the ▼ tab closes it
+        // DRIFT deck: OPEN at startup; the ▼ tab closes it, the UI tab reopens it. It tucks itself
+        // away when you enter first person (see setViewMode) and comes back when you leave.
         const deckEl = document.getElementById('deck');
+        deckEl.classList.add('open');
         document.getElementById('deck-pull').addEventListener('click', ()=>deckEl.classList.add('open'));
         document.getElementById('btn-reset-hud').addEventListener('click', resetWorld);
         document.getElementById('btn-fold').addEventListener('click', e=>{
@@ -3633,12 +3659,15 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
         if(mode !== 'orbit') layoutHand();
 
         if(prev === 'orbit' && mode !== 'orbit'){
+            const dk = document.getElementById('deck');
+            deckWasOpen = dk.classList.contains('open'); dk.classList.remove('open');   // tuck away for first person
             spawnPlayer();
             controls.enabled = false;
             BUB.ready = false; BUB.pending = false; BUB.id++;
             maintainBubble();
         }
         if(prev !== 'orbit' && mode === 'orbit'){
+            if(deckWasOpen) document.getElementById('deck').classList.add('open');       // back to orbit: restore the deck
             controls.enabled = true;
             releaseGrapple();
             killAllBlades(); clearDebris(); if(debrisMesh) debrisMesh.count = 0;
@@ -3767,6 +3796,109 @@ body.player-mode #xhair, body.player-mode #xlbl{ display:block; }
         }
     }
 
+
+    // ╔══════════════════════════════════════════════════════════╗
+    // ║ [IMPACT] anime-protagonist feel. Everything fires from   ║
+    // ║ something YOU did; nothing moves on its own.             ║
+    // ║  punch    cutting a stretched rope: FOV kick, speed lines║
+    // ║           and a single shake — the band's payoff         ║
+    // ║  hit-stop wall kick only: the world freezes a few frames, ║
+    // ║           then a short slow tail. The blade never slows  ║
+    // ║  reveal   first time a twin is in range and in view:     ║
+    // ║           letterbox, slow-mo, FOV zoom, eyes flare       ║
+    // ║  lines    faint speed streaks at the edges at top speed  ║
+    // ╚══════════════════════════════════════════════════════════╝
+    const fx = { punch:0, lines:0, stopT:0, tailT:0, stopCool:0, revealT:0, revealDur:1.4, revealCD:0, revealM:null,
+                 linesOn:false, seed:[], bars:null, cv:null, cx:null, w:0, h:0 };
+    function fxInit(){
+        if(fx.cv) return;
+        const st = document.createElement('style');
+        st.textContent = '#fx-lines{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:6}'
+            + '.fx-bar{position:fixed;left:0;width:100%;height:12vh;background:#000;pointer-events:none;z-index:7;transition:transform .28s cubic-bezier(.2,.8,.2,1)}'
+            + '#fx-top{top:0;transform:translateY(-101%)}#fx-bot{bottom:0;transform:translateY(101%)}'
+            + '.fx-bar.on{transform:translateY(0)}';
+        document.head.appendChild(st);
+        fx.cv = document.createElement('canvas'); fx.cv.id = 'fx-lines'; document.body.appendChild(fx.cv);
+        fx.cx = fx.cv.getContext('2d');
+        const t = document.createElement('div'); t.className = 'fx-bar'; t.id = 'fx-top'; document.body.appendChild(t);
+        const b = document.createElement('div'); b.className = 'fx-bar'; b.id = 'fx-bot'; document.body.appendChild(b);
+        fx.bars = [t, b];
+        for(let i = 0; i < 46; i++) fx.seed.push({ a:Math.random()*Math.PI*2, r:0.42 + Math.random()*0.30, l:0.10 + Math.random()*0.32, w:0.8 + Math.random()*1.8 });
+    }
+    // called from the rope-cut handler BEFORE the rope is released
+    function fxLaunch(){
+        if(!grapple.active || !(M.fxPunch > 0)) return;
+        const stretch = player.pos.distanceTo(grapple.anchor) - grapple.length;
+        if(stretch < 40) return;
+        const k = Math.min(1, stretch/500);
+        fx.punch = Math.max(fx.punch, (0.3 + 0.7*k)*M.fxPunch);
+        fx.lines = Math.max(fx.lines, 0.4 + 0.6*k);
+        player.shake = Math.max(player.shake, 0.05 + 0.10*k*M.fxPunch);
+        for(const s of fx.seed){ s.a = Math.random()*Math.PI*2; }
+    }
+    // wall kick: freeze the world briefly, then a slow tail (the blade does not call this)
+    function fxHit(scale){
+        if(fx.stopCool > 0 || !(M.fxHitStop > 0)) return;
+        fx.stopT = M.fxHitStop*(scale || 1); fx.tailT = 0; fx.stopCool = 0.6;
+    }
+    // world-time multiplier for this frame (real dt in, and it winds every timer down)
+    function fxTimeScale(dt){
+        let ts = 1;
+        if(fx.stopCool > 0) fx.stopCool -= dt;
+        if(fx.stopT > 0){ fx.stopT -= dt; ts = 0.02; if(fx.stopT <= 0) fx.tailT = M.fxSlowTail; }
+        else if(fx.tailT > 0){ const k = 1 - fx.tailT/Math.max(0.05, M.fxSlowTail); ts = 0.25 + 0.75*k*k; fx.tailT -= dt; }
+        if(fx.revealT > 0){ const e = Math.sin(Math.PI*Math.min(1, 1 - fx.revealT/fx.revealDur)); ts = Math.min(ts, 1 - 0.8*e); }
+        if(fx.punch > 0) fx.punch = Math.max(0, fx.punch - dt*2.2);
+        if(fx.lines > 0) fx.lines = Math.max(0, fx.lines - dt*2.0);
+        if(fx.revealCD > 0) fx.revealCD -= dt;
+        return ts;
+    }
+    // added to the horizontal FOV each frame: punch widens, the reveal zooms in
+    function fxFovAdd(){
+        let a = fx.punch*22;
+        if(fx.revealT > 0){ const e = Math.sin(Math.PI*Math.min(1, 1 - fx.revealT/fx.revealDur)); a -= 18*e; }
+        return a;
+    }
+    function fxReveal(m){
+        fx.revealT = fx.revealDur; fx.revealM = m; fx.revealCD = M.fxRevealCool;
+        fx.bars[0].classList.add('on'); fx.bars[1].classList.add('on');
+        toast('. . . it sees you . . .');
+    }
+    function fxUpdate(dt){
+        if(VIEW_MODE === 'orbit'){ fxClear(); return; }
+        // reveal: first twin in range and in view
+        if(fx.revealT > 0){
+            fx.revealT -= dt;
+            if(fx.revealT <= 0){ fx.bars[0].classList.remove('on'); fx.bars[1].classList.remove('on'); fx.revealM = null; }
+        } else if(M.fxReveal && fx.revealCD <= 0){
+            camera.getWorldDirection(_fxD);
+            for(const m of mimics){
+                _fxV.subVectors(m.pos, camera.position); const d = _fxV.length();
+                if(d < 1 || d > M.fxRevealRange) continue;
+                if(_fxV.multiplyScalar(1/d).dot(_fxD) > 0.55){ fxReveal(m); break; }
+            }
+        }
+        // speed lines: a burst after a launch, plus a faint version at top speed
+        const spd = mCl((player.vel.length() - M.speedFovStart)/Math.max(1, M.maxSpeed*1.4 - M.speedFovStart), 0, 1);
+        const a = Math.max(fx.lines, spd*spd*M.fxSpeedLines*0.6);
+        if(a < 0.02){ fxClear(); return; }
+        const W = innerWidth, H = innerHeight;
+        if(fx.w !== W || fx.h !== H){ fx.cv.width = W; fx.cv.height = H; fx.w = W; fx.h = H; }
+        const c = fx.cx; c.clearRect(0, 0, W, H);
+        const cx = W/2, cy = H/2, R = Math.hypot(cx, cy);
+        c.lineCap = 'round'; c.strokeStyle = `rgba(255,246,230,${Math.min(0.85, a)})`;
+        for(const s of fx.seed){
+            const r0 = R*(s.r + Math.random()*0.03), r1 = r0 + R*s.l*(0.6 + a), ca = Math.cos(s.a), sa = Math.sin(s.a);
+            c.lineWidth = s.w*(0.7 + a);
+            c.beginPath(); c.moveTo(cx + ca*r0, cy + sa*r0); c.lineTo(cx + ca*r1, cy + sa*r1); c.stroke();
+        }
+        fx.linesOn = true;
+    }
+    function fxClear(){
+        if(fx.linesOn && fx.cx){ fx.cx.clearRect(0, 0, fx.cv.width, fx.cv.height); fx.linesOn = false; }
+        if(fx.revealT > 0 && VIEW_MODE === 'orbit'){ fx.revealT = 0; fx.bars[0].classList.remove('on'); fx.bars[1].classList.remove('on'); }
+    }
+    const _fxD = new THREE.Vector3(), _fxV = new THREE.Vector3();
 
     // ╔══════════════════════════════════════════════════════════╗
     // ║ [MIMIC_BRAIN] pasted verbatim from MIMIC_LAB (the module ║
@@ -4123,7 +4255,16 @@ class MimicBrain {
         const capeGood = new THREE.Mesh(new THREE.ShapeGeometry(clean), mats.cape);
         const capeEvil = new THREE.Mesh(new THREE.ShapeGeometry(ragged), mats.cape);
         capeG.add(capeGood); capeG.add(capeEvil);
-        root.userData = { body, hand, mats, evilParts, capeG, capeGood, capeEvil, core, visor, lean:0, evil:-1 };
+        // inverted-hull outline: an ember rim so the twin reads as a silhouette against any background
+        mats.outline = new THREE.MeshBasicMaterial({ side:THREE.BackSide, fog:false });
+        const outlines = [];
+        body.children.slice().forEach(ch => {
+            if(!ch.isMesh || ch === capeGood || ch === capeEvil) return;
+            const o = new THREE.Mesh(ch.geometry, mats.outline);
+            o.position.copy(ch.position); o.rotation.copy(ch.rotation); o.scale.copy(ch.scale).multiplyScalar(1.28);
+            o.visible = false; body.add(o); outlines.push(o);
+        });
+        root.userData = { body, hand, mats, evilParts, outlines, capeG, capeGood, capeEvil, core, visor, lean:0, evil:-1 };
         root.frustumCulled = false;
         return root;
     }
@@ -4136,6 +4277,8 @@ class MimicBrain {
         m.cape.color.copy(mix(MODEL_GOOD.cape, _mcB.copy(STRUCT_OPP).multiplyScalar(0.62))).convertSRGBToLinear();
         m.glow.color.copy(mix(MODEL_GOOD.glow, _mcB.setRGB(1, 0.22, 0.10).lerp(STRUCT_OPP, 0.2))).convertSRGBToLinear();
         for(const p of u.evilParts) p.visible = evil > 0.35;
+        m.outline.color.setRGB(1, 0.28, 0.12).lerp(STRUCT_OPP, 0.15).convertSRGBToLinear();
+        for(const o of u.outlines) o.visible = evil > 0.35 && model !== selfModel;
         u.capeEvil.visible = evil > 0.5; u.capeGood.visible = evil <= 0.5;
         u.evil = evil;
     }
@@ -4202,13 +4345,39 @@ class MimicBrain {
         to.w = from.w; to.tail = from.tail.slice(); to.grams = new Set(from.grams);
         to.learnedCount = from.learnedCount; to.observedCount = from.observedCount;
     }
+    let haloTex = null;
+    function haloTexture(){
+        if(haloTex) return haloTex;
+        const c = document.createElement('canvas'); c.width = c.height = 128;
+        const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+        g.addColorStop(0, 'rgba(255,200,150,0.95)'); g.addColorStop(0.18, 'rgba(255,90,40,0.55)');
+        g.addColorStop(0.5, 'rgba(255,40,20,0.16)'); g.addColorStop(1, 'rgba(255,30,10,0)');
+        x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+        haloTex = new THREE.CanvasTexture(c);
+        return haloTex;
+    }
+    function makeTwinFx(){
+        const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map:haloTexture(), transparent:true, depthTest:false, depthWrite:false,
+                                                                    blending:THREE.AdditiveBlending, fog:false }));
+        halo.renderOrder = 20; halo.frustumCulled = false; scene.add(halo);
+        const beam = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 8, 1, true),
+            new THREE.MeshBasicMaterial({ color:0xff4a22, transparent:true, opacity:0.32, depthWrite:false, blending:THREE.AdditiveBlending, fog:false, side:THREE.DoubleSide }));
+        beam.frustumCulled = false; beam.renderOrder = 19; scene.add(beam);
+        return { halo, beam };
+    }
+    function disposeTwinFx(m){
+        if(!m.fx) return;
+        scene.remove(m.fx.halo); m.fx.halo.material.dispose();
+        scene.remove(m.fx.beam); m.fx.beam.geometry.dispose(); m.fx.beam.material.dispose();
+        m.fx = null;
+    }
     function newMimic(slot){
         if(!mimicP) mimicP = mbParams();
         const g = makePlayerModel(); scene.add(g);
         g.visible = false;
         const brain = new MIMIC.MimicBrain(mimicP, 1000 + slot*7919);
         if(mimics.length) copyBrain(mimics[0].brain, brain);
-        const m = { slot, g, brain, tok:0, intent:MIMIC.tokenToInput(0), pos:g.position, vel:new THREE.Vector3(),
+        const m = { slot, g, brain, fx:makeTwinFx(), flare:0, tok:0, intent:MIMIC.tokenToInput(0), pos:g.position, vel:new THREE.Vector3(),
                     yaw:0, pitch:0, init:false, over:0, acc:0, col:[1,1,1],
                     wall:{ on:false, nx:0, nz:0, coyote:0, cool:0 },
                     rope:{ state:'none', anchor:new THREE.Vector3(), len:0, fly:0, flyDur:0, line:null } };
@@ -4217,7 +4386,7 @@ class MimicBrain {
     function tintAllModels(){
         for(const m of mimics) tintModel(m.g, M.mimicEvil);
         for(const m of mimics){
-            m.col = [STRUCT_OPP.r*0.6 + 0.4, STRUCT_OPP.g*0.6 + 0.4, STRUCT_OPP.b*0.6 + 0.4];   // smoke lifted so it reads against the sky
+            m.col = [STRUCT_OPP.r*0.35 + 0.65, STRUCT_OPP.g*0.35 + 0.22, STRUCT_OPP.b*0.35 + 0.10];   // ember smoke: reads against any sky
             if(m.rope.line) m.rope.line.material.color.copy(STRUCT_OPP).lerp(_mcA.setRGB(1, 0.3, 0.2), 0.4);
         }
         if(selfModel) tintModel(selfModel, 0);
@@ -4226,12 +4395,12 @@ class MimicBrain {
     function tintMimics(){ tintAllModels(); }
     function syncMimics(){
         const want = Math.round(M.mimics);
-        while(mimics.length > want){ const m = mimics.pop(); scene.remove(m.g); disposeModel(m.g); dropRopeLine(m); }
+        while(mimics.length > want){ const m = mimics.pop(); scene.remove(m.g); disposeModel(m.g); dropRopeLine(m); disposeTwinFx(m); }
         while(mimics.length < want) mimics.push(newMimic(mimics.length));
         for(const m of mimics) m.g.scale.setScalar(M.mimicScale);
         tintAllModels();
     }
-    function clearMimics(){ for(const m of mimics){ scene.remove(m.g); disposeModel(m.g); dropRopeLine(m); } mimics.length = 0; }
+    function clearMimics(){ for(const m of mimics){ scene.remove(m.g); disposeModel(m.g); dropRopeLine(m); disposeTwinFx(m); } mimics.length = 0; }
     // respawn opposite you through the monument, facing it (the brains keep what they've learned)
     function resetMimics(){
         mimicCentre(_mC);
@@ -4248,6 +4417,7 @@ class MimicBrain {
             mimicCutRope(m);
             m.g.visible = true;
         });
+        fx.revealCD = 0; fx.revealT = 0;
         beatT = 0; beatIn.grapple = beatIn.release = beatIn.boost = beatIn.carve = beatIn.wallJump = false;
         beatIn.yaw0 = player.yaw; beatIn.pitch0 = player.pitch;
     }
@@ -4412,6 +4582,27 @@ class MimicBrain {
         p.addScaledVector(v, dt);
         mimicCollide(m, p.y);
         if(m.wall.cool > 0) m.wall.cool -= dt;
+        // stand-out: ember halo (visible through walls, never smaller than a dot on screen), pillar, eye flare
+        if(m.fx){
+            const dist = camera.position.distanceTo(p), t = performance.now()*0.004 + m.slot*2;
+            const flare = (fx.revealM === m) ? Math.sin(Math.PI*Math.min(1, 1 - fx.revealT/fx.revealDur)) : 0;
+            m.flare += (flare - m.flare)*Math.min(1, dt*14);
+            const gl = M.mimicGlow;
+            m.fx.halo.visible = gl > 0 && VIEW_MODE !== 'orbit';
+            if(m.fx.halo.visible){
+                const base = Math.max(M.mimicScale*2.6, dist*0.05)*gl*(1 + 0.12*Math.sin(t*2.1) + m.flare*1.6);
+                m.fx.halo.position.copy(p); m.fx.halo.scale.set(base, base, 1);
+                m.fx.halo.material.opacity = Math.min(1, 0.65 + 0.25*Math.sin(t*2.1) + m.flare*0.4);
+            }
+            const bh = M.mimicBeacon;
+            m.fx.beam.visible = bh > 0 && VIEW_MODE !== 'orbit';
+            if(m.fx.beam.visible){
+                const rad = Math.max(M.mimicScale*0.05, dist*0.0035)*(1 + m.flare*2);
+                m.fx.beam.scale.set(rad, bh, rad); m.fx.beam.position.set(p.x, p.y + bh/2, p.z);
+                m.fx.beam.material.opacity = 0.26 + 0.1*Math.sin(t*1.7) + m.flare*0.3;
+            }
+            m.g.userData.visor.scale.setScalar(1 + m.flare*2.6); m.g.userData.core.scale.setScalar(1 + m.flare*2.2);
+        }
         // model + rope line
         poseModel(m.g, m.yaw, m.pitch, v.length(), dt);
         if(r.line && r.line.visible){
@@ -4441,7 +4632,7 @@ class MimicBrain {
     function updateMimics(dt){
         if(mimics.length !== Math.round(M.mimics)) syncMimics();
         if(!mimics.length) return false;
-        if(VIEW_MODE === 'orbit'){ for(const m of mimics) m.g.visible = m.init; return false; }
+        if(VIEW_MODE === 'orbit'){ for(const m of mimics){ m.g.visible = m.init; if(m.fx){ m.fx.halo.visible = false; m.fx.beam.visible = false; } } return false; }
         if(!mimicP) mimicP = mbParams();
         for(const m of mimics) if(!m.init) resetMimics();
         if(player.boostIntensity > 0.05) beatIn.boost = true;
@@ -4461,7 +4652,7 @@ class MimicBrain {
     function animate(now){
         requestAnimationFrame(animate);
         drawSlash();
-        const dt = Math.min(0.05, (now - _lastT)/1000 || 0.016);
+        let dt = Math.min(0.05, (now - _lastT)/1000 || 0.016);
         _lastT = now;
 
         if(VIEW_MODE === 'orbit'){
@@ -4476,9 +4667,12 @@ class MimicBrain {
             }
             controls.update();
         } else {
+            const rdt = dt;                  // real time: look, camera, rope drawing
+            fxInit();
+            dt = dt*fxTimeScale(rdt);        // world time: hit-stop / slow-mo / reveal scale everything below
             physics(dt);
-            updateCamera(dt);
-            updateRope(dt);                  // after the camera — keeps the rope on your hand
+            updateCamera(rdt);
+            updateRope(rdt);                  // after the camera — keeps the rope on your hand
             updateSpecks();
             if(grapple.active || grapple.flying) paintCrosshair();
             stepBlades(dt);
@@ -4491,6 +4685,7 @@ class MimicBrain {
             const watchBusy = updateWatchers(dt, now);
             const masonsBusy = updateMasons(dt, now);
             const mimicBusy = updateMimics(dt);
+            fxUpdate(rdt);
             const fxBusy = coresBusy || masonsBusy || watchBusy || mimicBusy || blades.length > 0 || bodies.length > 0 || particles.length > 0;
             updateHUD();                      // live readout while flying (DOM only touched on change)
             requestAim(now);
