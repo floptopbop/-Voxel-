@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>ODM_WORLD</title>
+<title>ODM_MONKEY</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!--
@@ -39,6 +39,11 @@
            and cut history; loading rebuilds the base and replays cuts
   [SCALE]  world scale now updates spawn, forest clearings, arena,
            terrain extent, structure placement/build span, and boundaries
+  [MONKEY] LeadMonkey (V6 rules, deterministic drift) roams near your spawn: grapple it,
+           high-five it at speed, keep it out of the death spiral. Optional low-poly
+           model via the strip (JSON / OBJ), hand point optional.
+  [EMU]    flocks of emus (koi-pond rules: breeds, startle, bait, kicks, eggs); blades bonk them,
+           the monkey rides one when the moods line up. Roamer titans default to 0.
   [TUNE]   CORE_FORGE-style deck: hidden off-screen behind a tiny
            left pull-tab; scene buttons ride in a strip above it
   This merged build replaces the old removed project save/load with
@@ -80,6 +85,7 @@ body,html { background:var(--bg); color:var(--text); font-family:'Share Tech Mon
     transition:opacity 0.15s;
 }
 #tumble-fx.on { opacity:1; }
+#mk-blind { position:fixed; inset:0; z-index:34; pointer-events:none; opacity:0; background:radial-gradient(ellipse at 50% 58%, rgba(44,34,26,0.25) 0%, rgba(22,16,12,0.94) 70%); }
 
 /* joysticks */
 .odm-joy {
@@ -193,6 +199,14 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:12px;
     <button class="strip-btn" id="btn-type">boss: stacked</button>
     <button class="strip-btn" id="btn-ai">fights back: on</button>
     <button class="strip-btn" id="btn-clear">clear smoke</button>
+    <button class="strip-btn" id="btn-monkey">monkey: on</button>
+    <button class="strip-btn" id="btn-monkey-new">new monkey</button>
+    <button class="strip-btn" id="btn-monkey-model">monkey model</button>
+    <button class="strip-btn" id="btn-monkey-inspect">inspect monkey</button>
+    <button class="strip-btn" id="btn-monkey-default">default monkey</button>
+    <button class="strip-btn" id="btn-emus">emus: on</button>
+    <button class="strip-btn" id="btn-emus-new">new emus</button>
+    <input type="file" id="mk-file" accept=".json,.obj,.txt,application/json" style="display:none">
 </div>
     <div id="deck-tab"><span id="deck-toggle">▼</span> tuning <button id="deck-reset">reset saved</button><button id="deck-mode">all sliders</button></div>
     <div class="deck-body essentials" id="deck-body"></div>
@@ -228,10 +242,11 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:12px;
 </div>
 
 <div id="tumble-fx"></div>
+<div id="mk-blind"></div>
 <div id="toast-container"></div>
 
 <div id="hud">
-    spd <span id="h-spd">0</span> &nbsp;alt <span id="h-alt">0</span> &nbsp;boss <span id="h-hp">-</span> <span id="h-ts"></span> &nbsp;kills <span id="h-kills">0</span> &nbsp;hits <span id="h-hits">0</span> &nbsp;taken <span id="h-taken">0</span> &nbsp;<span class="st" id="h-status">idle</span>
+    spd <span id="h-spd">0</span> &nbsp;alt <span id="h-alt">0</span> &nbsp;boss <span id="h-hp">-</span> <span id="h-ts"></span> &nbsp;kills <span id="h-kills">0</span> &nbsp;hits <span id="h-hits">0</span> &nbsp;taken <span id="h-taken">0</span> &nbsp;&nbsp;mnk <span id="h-mnk">-</span> &nbsp;<span class="st" id="h-status">idle</span>
 </div>
 <canvas id="slash-canvas" style="position:fixed;inset:0;z-index:45;pointer-events:none;"></canvas>
 
@@ -1052,7 +1067,7 @@ const M = {
 
 const C = {
     // titan body
-    titanSize:360, titanHP:12, bodyDmg:1, napeDmg:4, stunMult:2, crackAt:0.5, rageMult:1.4,
+    titanSize:520, titanHP:12, bodyDmg:1, napeDmg:4, stunMult:2, crackAt:0.5, rageMult:1.4,
     napeReach:0.6, napeAngle:0.0, napeBlood:2.5, deathBloom:3,
     // blade
     bladeRadius:340, bladeCooldown:0.15, swipePx:60, swipeFrames:12, facingDot:0.35, ramSpeed:350,
@@ -1067,11 +1082,108 @@ const C = {
     sweepRange:340, sweepTime:0.55,
     chargeRange:1300, chargeSpeed:600, chargeTime:1.3,
     // roamers: smaller titans living in the forest
-    minions:7, minionScale:0.35, minionHP:3, minionAggro:1300, minionWalk:170, minionRespawn:25, leash:2600,
+    minions:0, minionScale:0.35, minionHP:3, minionAggro:1300, minionWalk:170, minionRespawn:25, leash:2600,
     bossWalk:50, bossLeash:900,
     // blood
     bloodBurst:120, bloodLife:2.5, leakRate:40, leakTime:3, bloodHue:355, bloodLight:0.27,
 };
+
+// ── [MONKEY] LeadMonkey config — every value is a tuned constant, all exposed in the deck ──
+// V6 rules (lead_monkey.py): flow zone → +recursion, feather-touch → +logic, rare death spiral.
+// Drift is deterministic (sine/cosine harmonics + sine-hash), no Math.random.
+// The body runs on the WORLD's own physics (M.gravity, M.airDrag, M.groundFric, M.hookPull,
+// M.ropeNorm, M.maxSpeed, M.maxRopeDist) — the scale values below only weaken/strengthen it.
+const MK = {
+    // body + roaming
+    size:28, homeDist:700, roam:900, notice:900, keepAway:55,
+    // physics (fractions of the player's world values)
+    gravScale:1, accelScale:0.4, pullScale:0.8, speedCap:0.8, reachScale:0.15,
+    hopHeight:26, hopSpeed:70, hopEvery:0.35,
+    // one "cycle" = one V6 supervise() step; think = how often it re-picks what it's doing
+    cycle:1.0, think:0.5,
+    // drifting weights
+    chaosMid:1.65, chaosAmp:0.85, chaosFloor:1.3, chaosRate:0.23, wildTop:2.3,
+    logicMid:0.55, logicAmp:0.42, logicRate:0.17,
+    recStart:1.0, recMax:3.0, recDecay:0.002,
+    // V6 high-five (flow zone): N cycles inside [zoneLo, zoneHi] → +zoneGain recursion
+    zoneLo:1.1, zoneHi:1.3, zoneCount:3, zoneGain:0.05,
+    // V6 feather-touch: logic below this → nudge up (or roll the spiral)
+    featherBelow:0.25, featherGain:0.05, featherDecay:0.04,
+    // V6 death spiral: base chance per cycle while logic is low, plus extra per player high-five streak
+    spiralChance:0.01, spiralRisk:0.01, spiralTime:4, spiralSeed:7,
+    // how wild (0..1, from chaos) it has to be before each behaviour switches on
+    swingAt:0.2, titanAt:0.4, throwAt:0.35, huntAt:0.65,
+    // rope (its own grapple)
+    ropeMin:1.2, ropeMax:5, ropeCD:1.5, swingMin:500,
+    // titans
+    titanRange:2500, biteCD:1.2, biteDmg:0.5, napeChance:0.3, latchTime:7, leap:120,
+    // hunting you + riding your back
+    huntRange:3000, climbDist:1.2, rideTime:9, rideCD:8, rideDrag:0.25, rideWeight:0.6,
+    rideJostle:0.06, rideBlind:0.55, shakeSpeed:300, shakeTime:1.0,
+    // bombnanas
+    throwEvery:3, throwRange:1600, throwMin:120, throwSpeed:260, throwScatter:0.25,
+    fuse:3.5, blastR:160, blastDmg:1, blastKnock:260, hurtPlayer:1, bananaMax:8, bananaSize:7,
+    // player high-five (the calm-down interaction)
+    hiReach:45, hiMinSpeed:60, hiCooldown:0.6, hiRec:0.05, hiLogic:0.08, hiCalm:0.25,
+    hiDrag:0.15, hiKick:30, hiHold:10, hiSave:1, hiRelease:1,
+    // optional low-poly model (JSON / OBJ)
+    modelUp:0, modelYaw:0, modelDepth:2,
+    // rig for a loaded model (zones in unit-height model space; auto-guessed on load while rigAuto = 1)
+    rigAuto:1, rigNeck:0.74, rigShoulder:0.66, rigHip:0.4, rigArmIn:0.14, rigArmBlend:0.08,
+    rigPlane:0.5, rigSwing:1, rigHandSide:1, rigShow:0, rigTest:0, rigGait:0, inspectDist:3.5,
+    // his smoke (same trail law as your gas; tint 0 = same grey as yours)
+    smokeScale:1, smokeWild:1, dustScale:1, smokeTint:0.6,
+    // ── buddy mode: he's your ally; chaos is a mood that flares up now and then (0 = the old always-chaotic monkey) ──
+    buddy:1, followDist:140, followSide:70, followLead:0.4, assistRange:1800, assistBite:1.5, buddyThrow:1, buddyThrowEvery:6, driftShare:0.35,
+    // mood: agitation fills from neglect / stress / excitement and drains with calm and high fives; full = a short flare
+    agitCalm:0.015, neglectAfter:40, neglectRate:0.04, stressGain:0.2, exciteGain:0.04,
+    flareAt:0.85, flareTime:6, flareCD:45, flareAfter:0.3, hiFlareCut:3,
+    // bond: high fives and flying together make him steadier and stronger
+    bondHi:0.05, bondNear:0.004, bondFar:0.002, bondFlare:0.3, bondBite:0.5,
+    // rope tangle: your line catches him when you fly past
+    tangle:1, tangleR:0.9, tangleCD:3, tangleFling:1.1, tangleBoost:0.25, tangleDrag:0.2, tangleSpin:10,
+    // your world rules, now his too
+    tumbleOn:1, tumbleScale:1, wallOn:1, structOn:1,
+    // his personality: curious = wanders off to mess with emus, timid = startles easily + keeps his distance,
+    // bold = climbs on anything + helps with titans sooner, playful = rides longer, tosses bombnanas as emu bait
+    curious:0.6, timid:0.35, bold:0.5, playful:0.5,
+};
+const MK_COL = { body:0x6B5642, face:0xB89B7C, dark:0x3F3329, gold:[0.79, 0.64, 0.33], banana:0xC9A455, rope:0x9A8A5E };
+const MKE = {
+    on:true, built:false, root:null, tilt:null, proc:null, custom:null, mats:[], arms:null, mHand:null,
+    modelText:null, autoOnce:false, handLocal:null, rig:null, inspect:false, ropeLine:null, bgroup:null, bananas:[], bmat:null, bfuse:null,
+    pos:new THREE.Vector3(), vel:new THREE.Vector3(), home:new THREE.Vector3(), hand:new THREE.Vector3(),
+    hitR:20, halfH:14, face:0, hx:0, hz:1, hopT:0, hopCD:0, gait:0, raise:0, glow:0, throwT:0, grounded:false,
+    time:0, cycleAcc:0, cycleN:0, thinkAcc:0, state:'GO', stT:0, omega:0,
+    intent:'ROAM', target:null, wild:0,
+    agit:0, flare:0, flareCDt:10, bond:0.2, pTum:false, crashes:0, tangles:0, wallJumps:0, tangleCDt:0, tumble:0,
+    tum:new THREE.Vector3(), tumAng:new THREE.Vector3(), wall:{ on:false, nx:0, nz:0, t:0, cool:0 }, voxGround:false,
+    smokeAcc:0, rope:{ active:false, type:'static', t:null, anchor:new THREE.Vector3(), time:0, last:null },
+    ropeCDt:0, throwCDt:2, rideCDt:0, latch:null, ride:null, blind:0, blindT:0, jostleT:0,
+    chaos:1.45, chaosRaw:1.45, logic:0.55, rec:1, calm:0, logicBias:0, flowN:0,
+    mount:null, emuNear:new Map(), emuT:0, emuCD:8, emuTgt:null, emuRolls:0, shyT:0, baitT:15, mounts:0, flares:0, flareEmu:false,
+    hiStreak:0, lastHi:-999, hiCD:0, hiTotal:0, spirals:0, saves:0, bites:0, thrown:0, rides:0, kills:0, _tick:0,
+};
+
+// ── [EMU] flocks of emus (koi-pond rules: breeds with traits, startle, flocking, bait, "who it's been near", eggs) ──
+// Every tuned value is in EM and on the deck ("emus" group). Breed tables are fixed character sheets.
+const EM = {
+    on:1, count:12, max:20, size:34, speed:1, startleR:420, startleAt:0.35, panicTime:3.5, spread:1,
+    baitR:700, kick:260, kickYou:1, bonk:1, rideTime:14, wildRide:4,
+    breed:1, layEvery:150, hatch:25, grow:120, mateMemory:0.995,
+};
+// trait limits (koi TRAIT_LIM): speed, boldness, shyness, flock pull, kick power, curiosity
+const EM_LIM = { speed:[0.6, 1.5], bold:[0.05, 1], shy:[0.05, 1], social:[0, 1], kick:[0.3, 1.5], curious:[0, 1] };
+// muted feather colours; necks are a dusty blue-grey like the real thing
+const EM_BREEDS = {
+    dusk:{ col:[0.36, 0.29, 0.23], tr:{ speed:1.0,  bold:0.75, shy:0.3,  social:0.6, kick:1.15, curious:0.3 } },
+    sage:{ col:[0.49, 0.52, 0.44], tr:{ speed:0.9,  bold:0.25, shy:0.85, social:0.9, kick:0.6,  curious:0.4 } },
+    rust:{ col:[0.54, 0.33, 0.22], tr:{ speed:1.3,  bold:0.55, shy:0.5,  social:0.4, kick:1.3,  curious:0.2 } },
+    pale:{ col:[0.75, 0.70, 0.60], tr:{ speed:0.85, bold:0.4,  shy:0.4,  social:0.5, kick:0.7,  curious:0.9 } },
+};
+const EM_TYPES = Object.keys(EM_BREEDS);
+const EMS = { list:[], eggs:[], dist:[], group:null, geo:null, mNeck:null, mLeg:null, mDark:null, mEgg:null, seed:1, toastT:0, time:0,
+    stolen:0, kicks:0, bonks:0, laid:0, hatched:0, bolts:0, bucks:0, steady:0 };
 
 const ATMO = { skyH:205, skyS:0.14, skyL:0.78, fogNear:1500, fogFar:14000, sunInt:1.0, ambInt:1.1, sunEl:54, sunAz:56, groundBright:1 };
 
@@ -1634,13 +1746,13 @@ function initSmoke(){
     });
     pPoints = new THREE.Points(pGeo, pMat); pPoints.frustumCulled = false; scene.add(pPoints);
 }
-function emit(pos, vel, lifeMult, red){
+function emit(pos, vel, lifeMult, red, tint){
     if(particles.length >= M.smokeMax) return;
     const life = (M.lifeMin + Math.random()*(M.lifeMax-M.lifeMin))*(lifeMult||1);
     const p = _pPool.pop() || { pos:new THREE.Vector3(), vel:new THREE.Vector3(), life:0, maxLife:0, red:false };
     p.pos.copy(pos);
     p.vel.set(vel.x+(Math.random()-0.5)*M.spread*2, vel.y+Math.random()*M.upDrift+(Math.random()-0.5)*M.spread, vel.z+(Math.random()-0.5)*M.spread*2);
-    p.life = p.maxLife = red ? C.bloodLife*(0.5+Math.random()*0.5) : life; p.red = !!red;
+    p.life = p.maxLife = red ? C.bloodLife*(0.5+Math.random()*0.5) : life; p.red = !!red; p.tint = tint || 0;
     particles.push(p);
 }
 function updateSmoke(dt){
@@ -1676,7 +1788,7 @@ function updateSmoke(dt){
         const dCam = p.pos.distanceTo(camP);
         const fade = Math.min(1, Math.max(0, (dCam-faceR*0.4)/(faceR*0.6)));
         if(p.red){ pCol[i3] = bloodCol.r; pCol[i3+1] = bloodCol.g; pCol[i3+2] = bloodCol.b; }
-        else { pCol[i3] = tt; pCol[i3+1] = tt*1.03; pCol[i3+2] = tt*1.07; }
+        else { const k = p.tint || 0; pCol[i3] = tt*(1+0.25*k); pCol[i3+1] = tt*(1.03-0.03*k); pCol[i3+2] = tt*(1.07-0.35*k); }
         pSize[i] = M.smokeSize*(0.5 + M.puffGrow*(1-f))*(p.red ? 1 : 0.8);
         pAlpha[i] = M.smokeOpacity*fade*Math.min(1,(1-f)/0.06)*Math.pow(f,0.8);
     }
@@ -1852,6 +1964,7 @@ function spawnMinions(){
         MINION_HOMES.push({ x, z, type:TYPES[MINION_HOMES.length % 3] });
     }
     MINION_HOMES.forEach((h, i) => spawnTitan({ boss:false, type:h.type, x:h.x, z:h.z, slot:i }));
+    reseatMonkey(); spawnEmus();
 }
 function setState(t, s, stun){
     t.state = s; t.st = 0; t.fired = false; t.struck = false;
@@ -1860,10 +1973,11 @@ function setState(t, s, stun){
 const RANGE = { stacked:() => C.slamRange, shroud:() => C.sweepRange*0.85, stag:() => C.chargeRange };   // × t.k for roamers
 
 // ── damage the titan ──
-function surfaceHit(t){
-    let dx = player.pos.x-t.base.x, dz = player.pos.z-t.base.z;
+function surfaceHit(t, from){
+    const f = from || player.pos;
+    let dx = f.x-t.base.x, dz = f.z-t.base.z;
     const l = Math.hypot(dx,dz) || 1; dx /= l; dz /= l;
-    const y = THREE.MathUtils.clamp(player.pos.y, t.base.y + t.H*0.1, t.base.y + t.H*0.95);
+    const y = THREE.MathUtils.clamp(f.y, t.base.y + t.H*0.1, t.base.y + t.H*0.95);
     return _hp.set(t.base.x+dx*t.r*0.9, y, t.base.z+dz*t.r*0.9);
 }
 function addWound(t, hitPos){
@@ -1872,20 +1986,21 @@ function addWound(t, hitPos){
     const l = t.yawG.worldToLocal(_wp.copy(hitPos));
     t.wounds.push({ ox:l.x, oy:l.y, oz:l.z, life:C.leakTime, total:C.leakTime, acc:0 });
 }
-function damageTitan(t, ix, iy, iz, nape){
+function damageTitan(t, ix, iy, iz, nape, from, dmgMul){
     if(!t || t.state === 'DEAD' || t.hitCD > 0) return;
     t.hitCD = C.hitCooldown;
-    let dmg = nape ? C.napeDmg : C.bodyDmg;
+    let dmg = (nape ? C.napeDmg : C.bodyDmg)*(dmgMul === undefined ? 1 : dmgMul);
     if(t.state === 'STUN') dmg *= C.stunMult;
     const mag = Math.hypot(ix, iz);
     const nx = mag > 1 ? ix/mag : 0, nz = mag > 1 ? iz/mag : 1;
     t.lastX = nx; t.lastZ = nz;
-    const hp = nape ? t.P.nape.getWorldPosition(_hp) : surfaceHit(t);
+    const hp = nape ? t.P.nape.getWorldPosition(_hp) : surfaceHit(t, from);
     t.vel.x += ix*C.knock*(nape ? 0.5 : 1); t.vel.z += iz*C.knock*(nape ? 0.5 : 1);
     const s = Math.min(1.8, 0.5 + mag/500)*(nape ? 1.6 : 1);
     t.w.x += nx*C.stagger*s; t.w.z += nz*C.stagger*s;
     t.flash = 1;
-    hitCount++; t.hp -= dmg;
+    if(!from) hitCount++;
+    t.hp -= dmg;
     addWound(t, hp);
     _imp.set(ix, iy, iz);
     emitBlood(hp, _imp, Math.round(C.bloodBurst*(nape ? C.napeBlood : 1)));
@@ -2223,6 +2338,10 @@ function scanHit(){
         const t = _raySphere(o, d, tt.pos, sr, bestT);
         if(t>=0){ bestT = t; hitPt = _hitV.copy(o).addScaledVector(d,t); _scanHitDummy = tt; }
     }
+    if(MKE.on && MKE.built){
+        const t = _raySphere(o, d, MKE.pos, MKE.hitR, bestT);
+        if(t>=0){ bestT = t; hitPt = _hitV.copy(o).addScaledVector(d,t); _scanHitDummy = MKE; }
+    }
     const locked = !!hitPt;
     if(locked !== _lastLocked){ EL.xhair.classList.toggle('locked', locked); _lastLocked = locked; }
     return hitPt;
@@ -2279,6 +2398,7 @@ function requestVoxelSlash(hist){
 
 function trySlash(hist){
     requestVoxelSlash(hist);                         // same swipe can cut the image-made structure
+    if(slashCD <= 0 && emuSlash(hist)){ slashCD = C.bladeCooldown; return; }
     if(slashCD > 0 || !titans.length) return;
     const n = hist.length; if(n < 3) return;
     const sdx = hist[n-1].x-hist[0].x, sdy = hist[n-1].y-hist[0].y;
@@ -2704,7 +2824,8 @@ function physics(dt){
     if(grapple.active){
         if(grapple.trackTarget){
             const tgt = grapple.trackTarget;
-            if(!titans.includes(tgt) || tgt.state === 'DEAD') releaseGrapple();
+            if(tgt === MKE){ if(!MKE.on || !MKE.built) releaseGrapple(); else grapple.anchor.copy(MKE.pos); }
+            else if(!titans.includes(tgt) || tgt.state === 'DEAD') releaseGrapple();
             else grapple.anchor.copy(tgt.pos);
         }
         if(grapple.active){
@@ -3353,6 +3474,73 @@ const GROUPS = [
     mk('leak rate',0,200,5,C,'leakRate'), mk('leak time',0,10,0.1,C,'leakTime'),
     mk('hue',0,360,1,C,'bloodHue'), mk('lightness',0.05,0.7,0.01,C,'bloodLight'),
  ]],
+ ['lead monkey', false, [
+    mk('monkey size',8,120,1,MK,'size', () => { MKE.halfH = MK.size*0.5; }), mk('monkey home dist',100,3000,50,MK,'homeDist',() => reseatMonkey()),
+    mk('monkey roam',100,3000,50,MK,'roam'), mk('monkey notice',100,3000,50,MK,'notice'), mk('monkey keep away',0,300,5,MK,'keepAway'),
+    mk('cycle seconds',0.2,5,0.1,MK,'cycle'), mk('think seconds',0.1,3,0.1,MK,'think'),
+    mk('chaos mid',0.5,2.5,0.01,MK,'chaosMid'), mk('chaos swing',0,1.5,0.01,MK,'chaosAmp'),
+    mk('chaos floor',0,2,0.01,MK,'chaosFloor'), mk('chaos rate',0.02,2,0.01,MK,'chaosRate'), mk('chaos top (wild = 1)',1.4,4,0.05,MK,'wildTop'),
+    mk('logic mid',0,1.2,0.01,MK,'logicMid'), mk('logic swing',0,1,0.01,MK,'logicAmp'), mk('logic rate',0.02,2,0.01,MK,'logicRate'),
+    mk('recursion start',0.5,3,0.05,MK,'recStart'), mk('recursion max',1,6,0.05,MK,'recMax'), mk('recursion decay',0,0.5,0.001,MK,'recDecay'),
+    mk('flow zone low',0.5,2.5,0.01,MK,'zoneLo'), mk('flow zone high',0.5,2.5,0.01,MK,'zoneHi'),
+    mk('flow cycles',1,10,1,MK,'zoneCount'), mk('flow gain',0,0.5,0.005,MK,'zoneGain'),
+    mk('feather below',0,1,0.01,MK,'featherBelow'), mk('feather gain',0,0.3,0.005,MK,'featherGain'), mk('feather decay',0,0.5,0.005,MK,'featherDecay'),
+    mk('spiral chance',0,0.5,0.001,MK,'spiralChance'), mk('spiral per streak',0,0.2,0.001,MK,'spiralRisk'),
+    mk('spiral time',0.5,12,0.5,MK,'spiralTime'), mk('spiral seed',1,999,1,MK,'spiralSeed'),
+    mk('hi-five reach',10,200,1,MK,'hiReach'), mk('hi-five min speed',0,400,5,MK,'hiMinSpeed'), mk('hi-five cooldown',0.1,3,0.05,MK,'hiCooldown'),
+    mk('hi-five recursion',0,0.3,0.005,MK,'hiRec'), mk('hi-five logic',0,0.4,0.005,MK,'hiLogic'), mk('hi-five calm',0,0.6,0.01,MK,'hiCalm'),
+    mk('hi-five drag',0,0.8,0.01,MK,'hiDrag'), mk('hi-five kick',0,150,1,MK,'hiKick'), mk('hi-five streak hold',1,60,1,MK,'hiHold'),
+    mk('hi-five saves spiral',0,1,1,MK,'hiSave'), mk('hi-five frees rope',0,1,1,MK,'hiRelease'),
+    mk('model up axis',0,1,1,MK,'modelUp',() => applyMonkeyModel()), mk('model yaw',0,6.28,0.05,MK,'modelYaw',() => applyMonkeyModel()),
+ ]],
+ ['monkey moves', false, [
+    mk('wild: swing at',0,1,0.01,MK,'swingAt'), mk('wild: titans at',0,1,0.01,MK,'titanAt'), mk('wild: bombs at',0,1,0.01,MK,'throwAt'), mk('wild: hunt you at',0,1,0.01,MK,'huntAt'),
+    mk('monkey gravity ×',0,2,0.05,MK,'gravScale'), mk('monkey accel ×',0,2,0.05,MK,'accelScale'), mk('monkey rope pull ×',0,2,0.05,MK,'pullScale'),
+    mk('monkey speed cap ×',0.1,2,0.05,MK,'speedCap'), mk('monkey rope reach ×',0.02,1,0.01,MK,'reachScale'),
+    mk('monkey hop height',0,150,1,MK,'hopHeight'), mk('monkey hop speed',0,300,5,MK,'hopSpeed'), mk('monkey hop rest',0.05,3,0.05,MK,'hopEvery'),
+    mk('rope min swing',0.2,6,0.1,MK,'ropeMin'), mk('rope max swing',1,15,0.5,MK,'ropeMax'), mk('rope cooldown',0,10,0.1,MK,'ropeCD'), mk('swing if goal beyond',100,3000,50,MK,'swingMin'),
+    mk('titan range',300,8000,100,MK,'titanRange'), mk('bite cooldown',0.1,5,0.05,MK,'biteCD'), mk('bite damage ×',0,5,0.05,MK,'biteDmg'),
+    mk('nape chance',0,1,0.01,MK,'napeChance'), mk('latch time',1,30,0.5,MK,'latchTime'), mk('leap off',0,400,5,MK,'leap'),
+    mk('hunt range',300,8000,100,MK,'huntRange'), mk('climb distance ×',0.3,4,0.05,MK,'climbDist'), mk('ride time',2,40,1,MK,'rideTime'), mk('ride cooldown',0,60,1,MK,'rideCD'),
+    mk('ride drag',0,3,0.05,MK,'rideDrag'), mk('ride weight',0,3,0.05,MK,'rideWeight'), mk('ride jostle',0,0.6,0.01,MK,'rideJostle'), mk('ride blindfold',0,1,0.05,MK,'rideBlind'),
+    mk('shake-off speed',50,450,5,MK,'shakeSpeed'), mk('shake-off time',0.2,6,0.1,MK,'shakeTime'),
+    mk('bomb every',0.3,15,0.1,MK,'throwEvery'), mk('bomb range',200,6000,50,MK,'throwRange'), mk('bomb min range',0,600,10,MK,'throwMin'),
+    mk('bomb throw speed',50,900,10,MK,'throwSpeed'), mk('bomb scatter',0,1,0.01,MK,'throwScatter'), mk('bomb fuse',0.5,10,0.1,MK,'fuse'),
+    mk('blast radius',20,600,5,MK,'blastR'), mk('blast damage ×',0,6,0.1,MK,'blastDmg'), mk('blast knock',0,800,10,MK,'blastKnock'),
+    mk('monkey smoke ×',0,4,0.05,MK,'smokeScale'), mk('monkey smoke wild ×',0,3,0.05,MK,'smokeWild'), mk('monkey dust ×',0,3,0.05,MK,'dustScale'), mk('monkey smoke tint',0,1,0.05,MK,'smokeTint'),
+    mk('bombs hurt you',0,1,1,MK,'hurtPlayer'), mk('bomb count max',1,20,1,MK,'bananaMax'), mk('bomb size',2,30,1,MK,'bananaSize'),
+ ]],
+ ['monkey buddy', false, [
+    mk('buddy mode (0 = chaos)',0,1,1,MK,'buddy'),
+    mk('follow settle dist',20,600,5,MK,'followDist'), mk('follow side offset',0,300,5,MK,'followSide'), mk('follow lead ×',0,1.5,0.05,MK,'followLead'),
+    mk('help range (titan near you)',300,6000,100,MK,'assistRange'), mk('ally bite ×',0,5,0.1,MK,'assistBite'), mk('ally bombs',0,1,1,MK,'buddyThrow'), mk('ally bomb every',1,30,0.5,MK,'buddyThrowEvery'),
+    mk('mood wobble (drift share)',0,1,0.01,MK,'driftShare'),
+    mk('agitation calm /s',0,0.2,0.005,MK,'agitCalm'), mk('neglect after s',3,120,1,MK,'neglectAfter'), mk('neglect rate /s',0,0.3,0.005,MK,'neglectRate'),
+    mk('stress gain',0,1,0.01,MK,'stressGain'), mk('excite per bite',0,0.2,0.005,MK,'exciteGain'),
+    mk('flare at',0.2,1,0.01,MK,'flareAt'), mk('flare time',1,40,0.5,MK,'flareTime'), mk('flare cooldown',0,200,1,MK,'flareCD'),
+    mk('calm after flare',0,1,0.01,MK,'flareAfter'), mk('high five cuts flare s',0,20,0.5,MK,'hiFlareCut'),
+    mk('bond per high five',0,0.3,0.005,MK,'bondHi'), mk('bond near /s',0,0.05,0.001,MK,'bondNear'), mk('bond loss far /s',0,0.05,0.001,MK,'bondFar'),
+    mk('bond calms flare',0,0.6,0.01,MK,'bondFlare'), mk('bond bite boost',0,2,0.05,MK,'bondBite'),
+    mk('rope tangle',0,1,1,MK,'tangle'), mk('tangle reach ×',0.2,3,0.05,MK,'tangleR'), mk('tangle cooldown',0,20,0.5,MK,'tangleCD'),
+    mk('tangle fling ×',0,2,0.05,MK,'tangleFling'), mk('tangle boost (ally)',0,1.5,0.05,MK,'tangleBoost'), mk('tangle drag (flare)',0,0.8,0.02,MK,'tangleDrag'), mk('tangle spin',0,30,1,MK,'tangleSpin'),
+    mk('monkey curious',0,1,0.01,MK,'curious'), mk('monkey timid',0,1,0.01,MK,'timid'), mk('monkey bold',0,1,0.01,MK,'bold'), mk('monkey playful',0,1,0.01,MK,'playful'),
+    mk('he crashes (tumble)',0,1,1,MK,'tumbleOn'), mk('tumble time ×',0,3,0.05,MK,'tumbleScale'), mk('he wall-runs',0,1,1,MK,'wallOn'), mk('structure is solid',0,1,1,MK,'structOn'),
+ ]],
+ ['emus', false, [
+    mk('emu count',0,40,1,EM,'count',() => spawnEmus()), mk('emu max (eggs stop)',2,60,1,EM,'max'), mk('emu size',10,80,1,EM,'size'), mk('emu speed ×',0.2,3,0.05,EM,'speed'),
+    mk('startle range',50,1500,10,EM,'startleR'), mk('startle at',0.05,2,0.01,EM,'startleAt'), mk('panic time',0.5,12,0.1,EM,'panicTime'), mk('panic spreads',0,2,0.05,EM,'spread'),
+    mk('bait range',0,2000,10,EM,'baitR'), mk('kick power',0,800,10,EM,'kick'), mk('emus kick you',0,1,1,EM,'kickYou'), mk('bonk ×',0,3,0.05,EM,'bonk'),
+    mk('emu ride time',2,40,0.5,EM,'rideTime'), mk('wild ride time',1,15,0.5,EM,'wildRide'),
+    mk('emus breed',0,1,1,EM,'breed'), mk('lay every s',10,400,5,EM,'layEvery'), mk('hatch s',2,120,1,EM,'hatch'), mk('chick grows s',5,400,5,EM,'grow'), mk('mate memory',0.95,0.9995,0.0005,EM,'mateMemory'),
+ ]],
+ ['monkey rig', false, [
+    mk('rig auto detect',0,1,1,MK,'rigAuto',() => { MKE.autoOnce = !!MK.rigAuto; applyMonkeyModel(); }),
+    mk('rig neck',0.3,0.95,0.01,MK,'rigNeck',() => mkRigBuild()), mk('rig shoulder',0.3,0.95,0.01,MK,'rigShoulder',() => mkRigBuild()), mk('rig hip',0.1,0.7,0.01,MK,'rigHip',() => mkRigBuild()),
+    mk('rig arm inner',0.02,0.5,0.01,MK,'rigArmIn',() => mkRigBuild()), mk('rig arm blend',0.01,0.2,0.01,MK,'rigArmBlend',() => mkRigBuild()),
+    mk('rig arm plane',0,1,0.05,MK,'rigPlane'), mk('rig swing ×',0,2,0.05,MK,'rigSwing'), mk('rig hand side',0,1,1,MK,'rigHandSide'),
+    mk('model depth ×',0.2,6,0.1,MK,'modelDepth',() => applyMonkeyModel()), mk('show rig zones',0,1,1,MK,'rigShow',() => mkRigBuild()),
+    mk('test: raise arm',0,1,0.05,MK,'rigTest'), mk('test: gait',0,1,0.05,MK,'rigGait'), mk('inspect distance ×',1.5,8,0.1,MK,'inspectDist'),
+ ]],
  ['smoke', false, [
     mk('smoke max',50,SMOKE_CAP,50,M,'smokeMax'), mk('puff size',2,120,1,M,'smokeSize'),
     mk('puff growth',0,3,0.05,M,'puffGrow'), mk('opacity',0.05,1,0.05,M,'smokeOpacity'),
@@ -3388,6 +3576,7 @@ const CORE = new Set([
     'titan size','titan hp','nape damage',
     'windup (tell)','attack cooldown','hits you for',
     'burst','leak time',
+    'monkey size','chaos mid','spiral chance','hi-five reach','monkey curious','emu count',
 ]);
 // world-shaping sliders live in the forge console, not the flight deck
 const FORGE_GROUPS = [
@@ -3548,7 +3737,7 @@ if(window.ResizeObserver) new ResizeObserver(resizeAll).observe(cc);
 const SAVE_KEY = 'ODM_WORLD_settings_v1';
 let _settingsReady = false, _saveT = 0;
 function collectSettings(){
-    return { v:1, worldScale:WORLD.scale, M, C, ATMO, VCFG, TCFG, WG, JOY,
+    return { v:1, worldScale:WORLD.scale, M, C, ATMO, VCFG, TCFG, WG, JOY, mk2:MK, monkeyOn:MKE.on, em:EM, emV:1,
         titanType:T.type, titanAI:T.ai, renderScale,
         deckAll: !document.getElementById('deck-body').classList.contains('essentials') };
 }
@@ -3566,7 +3755,8 @@ function restoreSettings(){
     if(!st || typeof st !== 'object') return false;
     if(typeof st.worldScale === 'number' && Number.isFinite(st.worldScale)) WORLD.scale = THREE.MathUtils.clamp(st.worldScale, 0.4, 3);
     applyKnownSettings(M, st.M); applyKnownSettings(C, st.C); applyKnownSettings(ATMO, st.ATMO);
-    applyKnownSettings(VCFG, st.VCFG); applyKnownSettings(TCFG, st.TCFG); applyKnownSettings(WG, st.WG); applyKnownSettings(JOY, st.JOY);
+    applyKnownSettings(VCFG, st.VCFG); applyKnownSettings(TCFG, st.TCFG); applyKnownSettings(WG, st.WG); applyKnownSettings(JOY, st.JOY); applyKnownSettings(MK, st.mk2); if(typeof st.monkeyOn === 'boolean') MKE.on = st.monkeyOn; applyKnownSettings(EM, st.em);
+    if(!st.emV){ C.minions = 0; C.titanSize = Math.max(C.titanSize, 520); }
     if(TYPES.includes(st.titanType)) T.type = st.titanType;
     if(typeof st.titanAI === 'boolean') T.ai = st.titanAI;
     if(typeof st.renderScale === 'number' && Number.isFinite(st.renderScale)) renderScale = THREE.MathUtils.clamp(st.renderScale, 0.5, 3);
@@ -3578,10 +3768,1597 @@ function restoreSettings(){
     ground.material.color.copy(GROUND_BASE).multiplyScalar(ATMO.groundBright);
     document.getElementById('btn-type').textContent = 'boss: ' + T.type;
     document.getElementById('btn-ai').textContent = 'fights back: ' + (T.ai ? 'on' : 'off');
+    syncMonkeyButtons(); syncEmuButton();
     syncAllControls();
     if(st.deckAll) document.getElementById('deck-mode').click();
     return true;
 }
+// ╔══════════════════════════════════════════════════════════╗
+// ║ [MONKEY] LeadMonkey — an interactable entity in the world ║
+// ║ chaos / logic / recursion drift on harmonics; grapple it, ║
+// ║ high-five it, keep it out of the death spiral             ║
+// ╚══════════════════════════════════════════════════════════╝
+const MK_KEY = 'ODM_MONKEY_model_v1';
+const _mkV = new THREE.Vector3(), _mkF = new THREE.Vector3(), _mkW = new THREE.Vector3(), _mkB = new THREE.Vector3();
+const mkWrap = a => a - 2*Math.PI*Math.floor((a + Math.PI)/(2*Math.PI));
+const mkHash = (a, b) => { const s = Math.sin(a*127.1 + (b||0)*311.7 + MK.spiralSeed*74.7)*43758.5453; return s - Math.floor(s); };
+const mkSS = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a)/(b - a))); return t*t*(3 - 2*t); };
+try{ const _mt = localStorage.getItem(MK_KEY); if(_mt) MKE.modelText = _mt; }catch(err){}
+
+// ── model: tolerant JSON / OBJ → indexed mesh, unit height, feet at y=0, body axis at x=0 ──
+//    reads: CONSTELLATION/PORYGON JSON (vertices/colors/faces), CONSTELLATION_SOLID .obj ("v x y z r g b"),
+//    three.js BufferGeometry JSON, flat arrays; quads are fanned; 1-based indices are detected
+function parseMonkeyModel(text){
+    let V = null, F = null, C = null, hand = null, data = null;
+    try{ data = JSON.parse(text); }catch(err){ data = null; }
+    const pick = (o, ks) => { if(o && typeof o === 'object') for(const k of ks) if(o[k] !== undefined && o[k] !== null) return o[k]; return null; };
+    if(data){
+        let src = data;
+        if(!Array.isArray(data)){ const nested = pick(data, ['mesh','model','geometry']); if(nested && typeof nested === 'object') src = nested; }
+        const att = pick(src, ['attributes']) || (src.data && src.data.attributes);
+        if(att && att.position){
+            V = att.position.array || att.position;
+            const ix = src.index || (src.data && src.data.index); F = ix ? (ix.array || ix) : null;
+            if(att.color) C = att.color.array || att.color;
+        } else {
+            V = pick(src, ['vertices','verts','positions','points','v']);
+            F = pick(src, ['faces','indices','triangles','tris','cells','f']);
+            C = pick(src, ['colors','vertexColors','colours']);
+        }
+        hand = pick(src, ['hand','handPoint','anchor']) || pick(data, ['hand','handPoint']);
+    } else {
+        V = []; F = []; C = [];
+        for(const ln of String(text).split(/\r?\n/)){
+            const p = ln.trim().split(/\s+/);
+            if(p[0] === 'v'){ V.push([+p[1], +p[2], +p[3]]); if(p.length >= 7) C.push([+p[4], +p[5], +p[6]]); }
+            else if(p[0] === 'f'){ const ids = p.slice(1).map(s => parseInt(s.split('/')[0], 10)); F.push(ids.map(i => i < 0 ? V.length + i : i - 1)); }
+        }
+        if(C.length !== V.length) C = null;
+    }
+    const toVerts = v => {
+        if(!v || !v.length) return null;
+        if(typeof v[0] === 'number'){ const o = []; for(let i = 0; i+2 < v.length; i += 3) o.push([v[i], v[i+1], v[i+2]]); return o; }
+        return v.map(p => Array.isArray(p) ? [+p[0], +p[1], +p[2]] : [+p.x, +p.y, +p.z]);
+    };
+    const verts = toVerts(V);
+    if(!verts) throw new Error('no vertices found');
+    for(const p of verts) if(!(isFinite(p[0]) && isFinite(p[1]) && isFinite(p[2]))) throw new Error('bad vertex');
+    let tris = [];
+    if(F && F.length){
+        if(typeof F[0] === 'number'){ for(let i = 0; i+2 < F.length; i += 3) tris.push([F[i], F[i+1], F[i+2]]); }
+        else for(const q of F){
+            const a = Array.isArray(q) ? q : (q.v || q.indices || [q.a, q.b, q.c]);
+            for(let k = 1; k+1 < a.length; k++) tris.push([a[0], a[k], a[k+1]]);
+        }
+        let mn = Infinity, mx = -Infinity;
+        for(const t of tris) for(const i of t){ if(i < mn) mn = i; if(i > mx) mx = i; }
+        if(mn >= 1 && mx === verts.length) tris = tris.map(t => t.map(i => i - 1));   // 1-based indices
+        tris = tris.filter(t => t.every(i => Number.isInteger(i) && i >= 0 && i < verts.length));
+    } else if(verts.length % 3 === 0){ for(let i = 0; i < verts.length; i += 3) tris.push([i, i+1, i+2]); }
+    if(!tris.length) throw new Error('no faces found');
+    // per-vertex colours (optional)
+    let cols = null;
+    if(C && C.length){
+        const cc = typeof C[0] === 'number' ? (() => { const o = []; for(let i = 0; i+2 < C.length; i += 3) o.push([C[i], C[i+1], C[i+2]]); return o; })() : C;
+        if(cc.length === verts.length){
+            let big = false;
+            cols = cc.map(c => { if(typeof c === 'string' || typeof c === 'number'){ const k = new THREE.Color(c); return [k.r, k.g, k.b]; } if(c[0] > 1 || c[1] > 1 || c[2] > 1) big = true; return [c[0], c[1], c[2]]; });
+            if(big) cols = cols.map(c => c.map(x => x/255));
+        }
+    }
+    // axis + normalise: height 1, feet on y=0, body axis (median x) on x=0, depth centred and scaled by modelDepth
+    const up = MK.modelUp|0;
+    const fix = p => up ? [p[0], p[2], -p[1]] : p;
+    const vv = verts.map(fix);
+    let y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for(const p of vv){ y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); z0 = Math.min(z0, p[2]); z1 = Math.max(z1, p[2]); }
+    const xs = vv.map(p => p[0]).sort((a, b) => a - b);
+    const sc = 1/Math.max(1e-6, y1 - y0), cx = xs[xs.length >> 1], cz = (z0 + z1)/2, dz = MK.modelDepth;
+    const nrm = p => [(p[0]-cx)*sc, (p[1]-y0)*sc, (p[2]-cz)*sc*dz];
+    const n = vv.length, pos = new Float32Array(n*3), col = new Float32Array(n*3), idx = new Uint32Array(tris.length*3);
+    for(let i = 0; i < n; i++){ const q = nrm(vv[i]); pos[i*3] = q[0]; pos[i*3+1] = q[1]; pos[i*3+2] = q[2];
+        const c = cols ? cols[i] : [0.72, 0.62, 0.5]; col[i*3] = c[0]; col[i*3+1] = c[1]; col[i*3+2] = c[2]; }
+    tris.forEach((t, ti) => { idx[ti*3] = t[0]; idx[ti*3+1] = t[1]; idx[ti*3+2] = t[2]; });
+    let handLocal = null;
+    if(hand !== null && hand !== undefined){
+        let hp = null;
+        if(typeof hand === 'number') hp = verts[hand]; else if(Array.isArray(hand)) hp = hand; else if(typeof hand === 'object') hp = [hand.x, hand.y, hand.z];
+        if(hp && hp.every(isFinite)) handLocal = nrm(fix(hp));
+    }
+    return { pos, col, idx, n, handLocal, tris:tris.length, hasCol:!!cols };
+}
+
+// ── rig: a loaded model is one rigid mesh, so it gets a soft zone skeleton (head, 2 arms, 2 legs)
+//    linear-blend skinned on the CPU. Zones come from a few numbers (all in the deck, auto-guessed on load):
+//    neck / shoulder / hip heights, how far out from the body axis the arms start, and how soft the edges are ──
+function mkRigAuto(m){
+    const n = m.n, p = m.pos;
+    const band = []; let minX = Infinity, maxX = -Infinity;
+    for(let i = 0; i < n; i++){
+        const x = p[i*3], y = p[i*3+1];
+        if(x < minX) minX = x; if(x > maxX) maxX = x;
+        if(y > 0.35 && y < 0.65) band.push(Math.abs(x));
+    }
+    band.sort((a, b) => a - b);
+    const tw = band.length ? band[Math.floor(band.length*0.6)] : 0.1;
+    // narrowest row between 60% and 90% height = neck
+    const rows = 30, lo = new Float32Array(rows).fill(Infinity), hi = new Float32Array(rows).fill(-Infinity);
+    for(let i = 0; i < n; i++){ const y = p[i*3+1]; const r = Math.min(rows-1, Math.max(0, Math.floor(y*rows))); const x = p[i*3]; if(x < lo[r]) lo[r] = x; if(x > hi[r]) hi[r] = x; }
+    let neck = 0.74, best = Infinity;
+    for(let r = Math.floor(rows*0.6); r < Math.floor(rows*0.9); r++){ const w = hi[r] - lo[r]; if(isFinite(w) && w < best){ best = w; neck = (r + 0.5)/rows; } }
+    MK.rigNeck = +Math.min(0.9, Math.max(0.55, neck)).toFixed(2);
+    MK.rigShoulder = +(MK.rigNeck - 0.08).toFixed(2);
+    // hip = the highest row (scanning down from just above the middle) where the body splits into two columns
+    const R2 = 50, rx = Array.from({ length:R2 }, () => []);
+    for(let i = 0; i < n; i++){ const r = Math.min(R2-1, Math.max(0, Math.floor(p[i*3+1]*R2))); rx[r].push(p[i*3]); }
+    const gapped = rx.map(a => { if(a.length < 4) return false; a.sort((u, v) => u - v); let g = 0; for(let k = 1; k < a.length; k++) g = Math.max(g, a[k] - a[k-1]); return g > 0.07; });
+    let hip = 0.4;
+    for(let r = Math.floor(R2*0.6); r >= 4; r--){ if(gapped[r] && gapped[r-1] && gapped[r-2]){ hip = (r + 1.5)/R2; break; } }
+    MK.rigHip = +Math.min(0.55, Math.max(0.15, hip)).toFixed(2);
+    MK.rigArmIn = +Math.max(0.06, Math.min(0.3, tw*1.05)).toFixed(2);
+    MK.rigArmBlend = 0.08;
+    MK.rigHandSide = (-minX > maxX) ? 0 : 1;          // the side that reaches further out is the "hand" arm
+}
+function mkRigBuild(){
+    const R = MKE.rig; if(!R) return;
+    const n = R.n, b = R.base, W = R.w;
+    const neck = MK.rigNeck, sh = MK.rigShoulder, hip = MK.rigHip, ai = MK.rigArmIn, ab = Math.max(0.01, MK.rigArmBlend);
+    const sx = ai*0.85, hx = ai*0.4;
+    R.sx = sx; R.hx = hx;
+    for(let i = 0; i < n; i++){
+        const x = b[i*3], y = b[i*3+1], ax = Math.abs(x);
+        const wH = mkSS(neck - 0.035, neck + 0.035, y);
+        const wxA = mkSS(ai, ai + ab, ax);
+        const wA = wxA*mkSS(sh + 0.07, sh - 0.03, y)*mkSS(hip - 0.1, hip, y)*(1 - wH);      // arms: out from the axis, shoulder down to the hip
+        const wL = mkSS(hip + 0.03, hip - 0.05, y)*(1 - wH);                                  // legs: everything below the hip
+        const sr = mkSS(-0.02, 0.02, x);
+        let w0 = wH, w1 = x < 0 ? wA : 0, w2 = x >= 0 ? wA : 0, w3 = wL*(1 - sr), w4 = wL*sr;
+        const s = w0 + w1 + w2 + w3 + w4; if(s > 1){ w0 /= s; w1 /= s; w2 /= s; w3 /= s; w4 /= s; }
+        const o = i*5; W[o] = w0; W[o+1] = w1; W[o+2] = w2; W[o+3] = w3; W[o+4] = w4;
+        // zone tint for the "show rig zones" view
+        const o3 = i*3, g = 1 - Math.min(1, w0 + w1 + w2 + w3 + w4);
+        R.zcol[o3]   = 0.42*g + 0.48*w0 + 0.66*(w1 + w2) + 0.31*(w3 + w4);
+        R.zcol[o3+1] = 0.42*g + 0.56*w0 + 0.41*(w1 + w2) + 0.43*(w3 + w4);
+        R.zcol[o3+2] = 0.42*g + 0.42*w0 + 0.31*(w1 + w2) + 0.60*(w3 + w4);
+    }
+    // arm tips = the vertex of each arm zone farthest from its shoulder (for a live high-five hand)
+    R.tip = [-1, -1];
+    for(let side = 0; side < 2; side++){
+        const px = side ? sx : -sx; let bd = -1;
+        for(let i = 0; i < n; i++){
+            const w = W[i*5 + 1 + side]; if(w < 0.45) continue;
+            const dx = b[i*3] - px, dy = b[i*3+1] - sh, dz = b[i*3+2], d = dx*dx + dy*dy + dz*dz;
+            if(d > bd){ bd = d; R.tip[side] = i; }
+        }
+    }
+    const ca = R.geo.attributes.color.array;
+    ca.set(MK.rigShow ? R.zcol : R.col); R.geo.attributes.color.needsUpdate = true;
+}
+const _rgM = [0, 1, 2, 3, 4].map(() => new THREE.Matrix4()), _rgT = new THREE.Matrix4(), _rgR = new THREE.Matrix4();
+function mkRigMat(out, px, py, pz, rz, rx, ry){
+    out.makeTranslation(px, py, pz);
+    if(ry){ out.multiply(_rgR.makeRotationY(ry)); }
+    if(rz){ out.multiply(_rgR.makeRotationZ(rz)); }
+    if(rx){ out.multiply(_rgR.makeRotationX(rx)); }
+    out.multiply(_rgT.makeTranslation(-px, -py, -pz));
+}
+// P: head yaw/pitch (hy, hp), arm swing angles (aL, aR; negative = forward/up, same as the box monkey), legs (lL, lR)
+function mkRigApply(P){
+    const R = MKE.rig; if(!R || !MKE.custom) return;
+    const phi = MK.rigPlane*Math.PI*0.5, cf = Math.cos(phi), sf = Math.sin(phi), sw = MK.rigSwing;
+    const plus = MK.rigHandSide >= 0.5, aP = (plus ? P.aR : P.aL)*sw, aM = (plus ? P.aL : P.aR)*sw;
+    const armRot = (th, side) => ({ rx:th*cf, rz:side*Math.max(0, -th)*sf });          // raise = out to the side, mixed with forward
+    const hp = armRot(aP, 1), hm = armRot(aM, -1);
+    mkRigMat(_rgM[0], 0, MK.rigNeck, 0, 0, P.hp, P.hy);
+    mkRigMat(_rgM[1], -R.sx, MK.rigShoulder, 0, hm.rz, hm.rx, 0);
+    mkRigMat(_rgM[2], R.sx, MK.rigShoulder, 0, hp.rz, hp.rx, 0);
+    mkRigMat(_rgM[3], -R.hx, MK.rigHip, 0, 0, P.lL*sw, 0);
+    mkRigMat(_rgM[4], R.hx, MK.rigHip, 0, 0, P.lR*sw, 0);
+    const e = _rgM.map(m => m.elements), b = R.base, W = R.w, out = R.pos, n = R.n;
+    for(let i = 0; i < n; i++){
+        const o = i*5, o3 = i*3, x = b[o3], y = b[o3+1], z = b[o3+2];
+        const s = W[o] + W[o+1] + W[o+2] + W[o+3] + W[o+4];
+        if(s < 1e-4){ out[o3] = x; out[o3+1] = y; out[o3+2] = z; continue; }
+        let nx = x*(1 - s), ny = y*(1 - s), nz = z*(1 - s);
+        for(let k = 0; k < 5; k++){
+            const w = W[o + k]; if(w < 1e-4) continue; const m = e[k];
+            nx += w*(m[0]*x + m[4]*y + m[8]*z + m[12]); ny += w*(m[1]*x + m[5]*y + m[9]*z + m[13]); nz += w*(m[2]*x + m[6]*y + m[10]*z + m[14]);
+        }
+        out[o3] = nx; out[o3+1] = ny; out[o3+2] = nz;
+    }
+    R.geo.attributes.position.needsUpdate = true;
+    // live hand: where the raised arm's tip is right now (so the high five lands on the paw)
+    if(!R.fixedHand){
+        const ti = R.tip[plus ? 1 : 0];
+        if(ti >= 0){
+            const my = MK.modelYaw, c = Math.cos(my), s2 = Math.sin(my), px = out[ti*3], pz = out[ti*3+2];
+            MKE.handLocal.set(px*c + pz*s2, out[ti*3+1], -px*s2 + pz*c);
+        }
+    }
+}
+
+function applyMonkeyModel(){
+    if(!MKE.root) return;
+    if(MKE.custom){ MKE.tilt.remove(MKE.custom); MKE.custom.geometry.dispose(); MKE.custom.material.dispose(); MKE.custom = null; }
+    MKE.handLocal = null; MKE.rig = null;
+    MKE.proc.visible = true;
+    if(!MKE.modelText) return;
+    try{
+        const m = parseMonkeyModel(MKE.modelText);
+        if(MK.rigAuto && MKE.autoOnce){ mkRigAuto(m); MKE.autoOnce = false; if(typeof syncAllControls === 'function') syncAllControls(); }
+        const g = new THREE.BufferGeometry();
+        const posAttr = new THREE.BufferAttribute(new Float32Array(m.pos), 3); posAttr.setUsage(THREE.DynamicDrawUsage);
+        g.setAttribute('position', posAttr);
+        g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(m.col), 3));
+        g.setIndex(new THREE.BufferAttribute(m.idx, 1));
+        const mat = new THREE.MeshPhongMaterial({ color:0xffffff, vertexColors:true, flatShading:true, shininess:0, specular:0x000000, side:THREE.DoubleSide });
+        const mesh = new THREE.Mesh(g, mat);
+        mesh.rotation.y = MK.modelYaw; mesh.frustumCulled = false;
+        MKE.tilt.add(mesh); MKE.custom = mesh; MKE.proc.visible = false;
+        MKE.rig = { n:m.n, base:m.pos, pos:posAttr.array, geo:g, col:m.col, zcol:new Float32Array(m.n*3), w:new Float32Array(m.n*5), sx:0.1, hx:0.04, tip:[-1, -1], fixedHand:!!m.handLocal };
+        MKE.handLocal = m.handLocal ? new THREE.Vector3(...m.handLocal) : new THREE.Vector3(0, 0.95, 0.3);
+        mkRigBuild();
+        mkRigApply({ hy:0, hp:0, aL:0, aR:0, lL:0, lR:0 });
+        showToast('monkey model  ' + m.n + ' pts  ' + m.tris + ' tris' + (m.hasCol ? '' : '  (no colours)'));
+    }catch(err){
+        showToast('monkey model: ' + err.message);
+        MKE.proc.visible = true;
+    }
+}
+// ── body (unit height; scaled by MK.size) ──
+function disposeMonkey(){
+    if(!MKE.root) return;
+    scene.remove(MKE.root);
+    MKE.root.traverse(o => { if(o.geometry) o.geometry.dispose(); });
+    for(const m of MKE.mats) m.dispose();
+    if(MKE.custom) MKE.custom.material.dispose();
+    if(MKE.ropeLine){ scene.remove(MKE.ropeLine); MKE.ropeLine.geometry.dispose(); MKE.ropeLine.material.dispose(); MKE.ropeLine = null; }
+    if(MKE.bgroup){ scene.remove(MKE.bgroup); MKE.bgroup.traverse(o => { if(o.geometry) o.geometry.dispose(); }); MKE.bgroup = null; }
+    if(MKE.bmat){ MKE.bmat.dispose(); MKE.bfuse.dispose(); MKE.bmat = MKE.bfuse = null; }
+    MKE.bananas.length = 0;
+    MKE.root = null; MKE.mats = []; MKE.custom = null; MKE.rig = null; MKE.built = false;
+}
+function buildMonkey(){
+    disposeMonkey();
+    const root = new THREE.Group(), tilt = new THREE.Group(), proc = new THREE.Group();
+    root.add(tilt); tilt.add(proc);
+    const mk3 = (c, em) => new THREE.MeshPhongMaterial({ color:c, emissive:em || 0x000000, specular:0x000000, shininess:0, flatShading:true });
+    const mBody = mk3(MK_COL.body), mFace = mk3(MK_COL.face), mDark = mk3(MK_COL.dark), mHand = mk3(MK_COL.face);
+    MKE.mats = [mBody, mFace, mDark, mHand]; MKE.mHand = mHand;
+    const box = (w, h, d, m, x, y, z, par) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); par.add(b); return b; };
+    const piv = (x, y, z) => { const g = new THREE.Group(); g.position.set(x, y, z); proc.add(g); return g; };
+    box(0.34, 0.40, 0.22, mBody, 0, 0.56, 0, proc);                 // torso
+    box(0.24, 0.22, 0.22, mBody, 0, 0.86, 0.02, proc);              // head
+    box(0.17, 0.12, 0.05, mFace, 0, 0.85, 0.135, proc);             // face plate
+    box(0.10, 0.07, 0.07, mFace, 0, 0.82, 0.17, proc);              // snout
+    box(0.05, 0.05, 0.03, mDark, -0.05, 0.89, 0.165, proc); box(0.05, 0.05, 0.03, mDark, 0.05, 0.89, 0.165, proc);   // eyes
+    box(0.06, 0.09, 0.04, mBody, -0.15, 0.88, 0, proc); box(0.06, 0.09, 0.04, mBody, 0.15, 0.88, 0, proc);           // ears
+    const armL = piv(0.24, 0.72, 0), armR = piv(-0.24, 0.72, 0);
+    for(const a of [armL, armR]){ box(0.09, 0.42, 0.09, mBody, 0, -0.21, 0, a); box(0.11, 0.11, 0.11, a === armR ? mHand : mFace, 0, -0.46, 0, a); }
+    const legL = piv(0.10, 0.36, 0), legR = piv(-0.10, 0.36, 0);
+    for(const l of [legL, legR]){ box(0.12, 0.36, 0.12, mBody, 0, -0.18, 0, l); }
+    const tail = piv(0, 0.46, -0.12);
+    box(0.05, 0.05, 0.22, mDark, 0, 0.04, -0.10, tail); box(0.05, 0.16, 0.05, mDark, 0, 0.12, -0.22, tail);
+    MKE.arms = { armL, armR, legL, legR, tail };
+    MKE.root = root; MKE.tilt = tilt; MKE.proc = proc;
+    scene.add(root);
+    // its own rope
+    const rg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    MKE.ropeLine = new THREE.Line(rg, new THREE.LineBasicMaterial({ color:MK_COL.rope }));
+    MKE.ropeLine.frustumCulled = false; MKE.ropeLine.visible = false; scene.add(MKE.ropeLine);
+    // bombnana pool
+    MKE.bgroup = new THREE.Group(); scene.add(MKE.bgroup);
+    MKE.bmat = mk3(MK_COL.banana); MKE.bfuse = mk3(MK_COL.dark);
+    MKE.bananas.length = 0;
+    MKE.built = true; root.visible = MKE.on;
+    applyMonkeyModel();
+}
+
+
+// ── his own smoke: the same trail law as your gas (M.smokeBase → M.smokeMaxRate by speed, +30% on a rope),
+//    warm-tinted so you can tell his from yours; more when he's wild, a lot when he spirals ──
+const _mkSp = new THREE.Vector3(), _mkSv = new THREE.Vector3(), _mkSd = new THREE.Vector3();
+function mkPuff(pos, vel, life){ emit(pos, vel, life, false, MK.smokeTint); }
+function mkDust(pos, n, spd){
+    for(let i = 0; i < n && particles.length < M.smokeMax; i++){
+        const a = Math.random()*Math.PI*2;
+        _mkSd.set(Math.cos(a)*spd*(0.4 + Math.random()*0.6), 10 + Math.random()*30, Math.sin(a)*spd*(0.4 + Math.random()*0.6));
+        mkPuff(pos, _mkSd, 0.5);
+    }
+}
+function monkeySmoke(dt, wasG, pvy){
+    if(MK.smokeScale <= 0 || MKE.state === 'RIDE') return;
+    const v = MKE.vel, spd = v.length(), cap = M.maxSpeed*MK.speedCap, spiral = MKE.state === 'SPIRAL';
+    let rate = 0;
+    if(spd > 1){ const t = Math.min(1, (spd - 1)/Math.max(1, cap - 1)); rate = M.smokeBase + t*(M.smokeMaxRate - M.smokeBase); }
+    if(MKE.rope.active) rate += M.smokeMaxRate*0.3;
+    rate *= MK.smokeScale*(1 + MKE.wild*MK.smokeWild)*(spiral ? 3 : 1);
+    if(rate > 0 && particles.length < M.smokeMax){
+        MKE.smokeAcc += rate*dt;
+        if(spd > 1) _mkSv.copy(v).multiplyScalar(-1/spd); else _mkSv.set(0, 1, 0);
+        while(MKE.smokeAcc >= 1 && particles.length < M.smokeMax){
+            MKE.smokeAcc -= 1;
+            _mkSp.copy(MKE.pos).addScaledVector(_mkSv, MK.size*0.4 + Math.random()*MK.size*0.3);
+            _mkW.copy(_mkSv).multiplyScalar(4 + Math.random()*8);
+            mkPuff(_mkSp, _mkW, 1);
+        }
+    } else MKE.smokeAcc = 0;
+    // landing: dust ring at the feet, bigger the harder he lands
+    if(!wasG && MKE.grounded && pvy < -30 && MK.dustScale > 0){
+        _mkSp.set(MKE.pos.x, MKE.pos.y - MKE.halfH, MKE.pos.z);
+        mkDust(_mkSp, Math.min(26, Math.round((4 + (-pvy)*0.15)*MK.dustScale)), 40 + (-pvy)*0.4);
+    }
+}
+
+
+// ── mood: he's your ally. Agitation fills from neglect (no high five for a while), stress (crashes, yours and his,
+//    rope tangles) and excitement (bites, blasts). Full → a short feral FLARE (ride your back, bombs at you), then he settles.
+//    High fives drain it and cut a flare short; flying together builds a BOND that makes him steadier and stronger. ──
+function mkStress(x){ MKE.agit = Math.min(1, MKE.agit + x*(0.65 + MK.timid)); }     // timid: everything rattles him more
+function monkeyFlare(on){
+    if(on){
+        MKE.flare = MK.flareTime*(1 - 0.4*MKE.bond); MKE.agit = 1; showToast('monkey: flare');
+        MKE.flares++; MKE.flareEmu = mkHash(MKE.flares, 91) < (MK.playful + MK.curious)*0.4;     // some flares go after you, some after an emu
+        if(MKE.mount && MKE.mount.ride && MKE.mount.ride.mode === 'STEADY') emRideWild(MKE.mount);  // his mood spooks his ride
+    }
+    else { MKE.flare = 0; MKE.agit = MK.flareAfter; MKE.flareCDt = MK.flareCD; if(MKE.ride) monkeyEndRide(true); showToast('monkey: calmed down'); }
+}
+function monkeyMood(dt){
+    if(!MK.buddy){ MKE.flare = 0; return; }
+    const S = WORLD.scale, pd = Math.hypot(player.pos.x - MKE.pos.x, player.pos.z - MKE.pos.z);
+    MKE.flareCDt -= dt;
+    if(pd < 400*S) MKE.bond = Math.min(1, MKE.bond + MK.bondNear*dt);
+    else if(pd > 1500*S) MKE.bond = Math.max(0, MKE.bond - MK.bondFar*dt);
+    const pt = player.tumble > 0;                                             // you crashing worries him
+    if(pt && !MKE.pTum && pd < 600*S) mkStress(MK.stressGain*0.5);
+    MKE.pTum = pt;
+    if(MKE.flare > 0){
+        MKE.flare -= dt; MKE.agit = 1;
+        if(MKE.flare <= 0) monkeyFlare(false);
+        return;
+    }
+    if(MKE.time - MKE.lastHi > MK.neglectAfter*(1 + MKE.bond)) MKE.agit += MK.neglectRate*dt;
+    if(MKE.mount && MKE.mount.ride && MKE.mount.ride.mode === 'STEADY') MKE.agit -= 0.02*(0.5 + MK.playful)*dt;   // a good ride settles him
+    MKE.agit = THREE.MathUtils.clamp(MKE.agit - MK.agitCalm*dt, 0, 1);
+    if(MKE.flareCDt <= 0 && MKE.state !== 'SPIRAL' && MKE.agit >= Math.min(0.99, MK.flareAt + MK.bondFlare*MKE.bond)) monkeyFlare(true);
+}
+function monkeyBiteMul(){ return (MK.buddy && MKE.flare <= 0) ? (1 + MKE.bond*MK.bondBite)*MK.assistBite : 1; }
+
+// ── same crash rule as yours: hit something faster than M.tumbleThresh and he spins out, no steering until it passes ──
+function mkTumble(impact){
+    if(!MK.tumbleOn || MKE.tumble > 0) return;
+    const k = Math.min(2, impact/M.tumbleThresh), n = ++MKE.crashes, s = M.tumbleSpin*k*0.5;
+    MKE.tumble = M.tumbleTime*k*MK.tumbleScale;
+    MKE.tum.set((mkHash(n, 61)*2 - 1)*s, (mkHash(n, 62)*2 - 1)*s, (mkHash(n, 63)*2 - 1)*s*1.4);
+    monkeyDropRope();
+    if(MK.dustScale > 0) mkDust(MKE.pos, Math.round(14*MK.dustScale*k), 60 + impact*0.2);
+    mkStress(MK.stressGain*k);
+}
+// the structure is solid for him too (same voxel bubble you collide with)
+function mkBlocked(p, r, hh){
+    return !!(solidVox(p.x, p.y, p.z) || solidVox(p.x + r, p.y, p.z) || solidVox(p.x - r, p.y, p.z) || solidVox(p.x, p.y, p.z + r) || solidVox(p.x, p.y, p.z - r) || solidVox(p.x, p.y + hh, p.z) || solidVox(p.x, p.y - hh, p.z));
+}
+
+// ── rope tangle: fly past him and your line catches. No aiming, no button — it just happens.
+//    As an ally he slings you (a speed boost) and goes cartwheeling; mid-flare he just snags you (drag). Your rope is always cut loose. ──
+function monkeyTangle(dt){
+    MKE.tangleCDt -= dt;
+    if(!MK.tangle || MKE.tangleCDt > 0 || !grapple.active || grapple.trackTarget === MKE || MKE.state !== 'GO' || player.tumble > 0) return;
+    const a = player.pos, b = grapple.anchor; _mkF.subVectors(b, a); const l2 = _mkF.lengthSq(); if(l2 < 1) return;
+    const u = THREE.MathUtils.clamp(_mkW.subVectors(MKE.pos, a).dot(_mkF)/l2, 0, 1);
+    if(u < 0.08 || u > 0.92) return;
+    _mkW.copy(a).addScaledVector(_mkF, u);
+    if(_mkW.distanceTo(MKE.pos) > MK.size*(MK.tangleR + 0.6*MKE.wild)) return;
+    const ally = MK.buddy && MKE.flare <= 0, ps = player.vel.length();
+    MKE.vel.copy(player.vel).multiplyScalar(MK.tangleFling); MKE.vel.y += 40;       // flung along your line of travel
+    const n = ++MKE.crashes;
+    MKE.tumble = Math.max(MKE.tumble, 0.8); MKE.tumAng.set(0, 0, 0);
+    MKE.tum.set((mkHash(n, 71)*2 - 1)*MK.tangleSpin, (mkHash(n, 72)*2 - 1)*MK.tangleSpin, (mkHash(n, 73)*2 - 1)*MK.tangleSpin);
+    monkeyDropRope(); releaseGrapple();
+    if(ally){ player.vel.multiplyScalar(1 + MK.tangleBoost*(0.4 + 0.6*MKE.bond)); if(player.vel.length() > M.maxSpeed) player.vel.setLength(M.maxSpeed); showToast('tangle: he slings you'); }
+    else { player.vel.multiplyScalar(1 - MK.tangleDrag); showToast('tangle: snagged'); }
+    MKE.tangleCDt = MK.tangleCD; mkStress(MK.stressGain*0.4); MKE.tangles++;
+    if(MK.dustScale > 0) mkDust(MKE.pos, Math.round(8*MK.dustScale), 50);
+}
+
+// ── bombnanas ──
+function mkBananaMesh(){
+    const g = new THREE.Group();
+    const b = (w, h, d, m, x, y, z, rz) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); o.rotation.z = rz; g.add(o); };
+    b(0.9, 0.32, 0.32, MKE.bmat, -0.38, -0.05, 0, 0.35); b(0.9, 0.32, 0.32, MKE.bmat, 0.38, -0.05, 0, -0.35);
+    b(0.2, 0.2, 0.2, MKE.bfuse, 0.86, 0.12, 0, 0); b(0.2, 0.2, 0.2, MKE.bfuse, -0.86, 0.12, 0, 0);
+    MKE.bgroup.add(g); return g;
+}
+function throwBanana(target, tvel){
+    let b = MKE.bananas.find(x => !x.live);
+    if(!b){ if(MKE.bananas.length >= MK.bananaMax) return false; b = { live:false, pos:new THREE.Vector3(), vel:new THREE.Vector3(), fuse:0, age:0, mesh:mkBananaMesh() }; MKE.bananas.push(b); }
+    const g = -M.gravity*MK.gravScale;
+    b.pos.copy(MKE.hand); b.pos.y += MK.size*0.15;
+    _mkW.copy(target); if(tvel) _mkW.addScaledVector(tvel, 0.5);                    // lead the target a little
+    const dx = _mkW.x - b.pos.x, dy = _mkW.y - b.pos.y, dz = _mkW.z - b.pos.z;
+    const T = Math.max(0.35, Math.hypot(dx, dy, dz)/MK.throwSpeed);
+    b.vel.set(dx/T, (dy + 0.5*g*T*T)/T, dz/T);
+    const sc = MK.throwScatter*MKE.wild*(1.2 - THREE.MathUtils.clamp(MKE.logic, 0, 1))*b.vel.length();   // logic aims, chaos scatters
+    const n = ++MKE.thrown;
+    b.vel.x += (mkHash(n, 11)*2 - 1)*sc; b.vel.y += (mkHash(n, 12)*2 - 1)*sc*0.5; b.vel.z += (mkHash(n, 13)*2 - 1)*sc;
+    b.foe = !(MK.buddy && MKE.flare <= 0);
+    b.carrier = null; b.bait = false; b.rest = false;
+    b.fuse = MK.fuse; b.age = 0; b.live = true; b.mesh.visible = true; b.mesh.scale.setScalar(MK.bananaSize);
+    MKE.throwT = 0.35;
+    return b;
+}
+function bananaBoom(b){
+    b.live = false; b.mesh.visible = false;
+    if(b.carrier){ b.carrier.carry = null; b.carrier = null; }
+    const p = b.pos;
+    emuBlast(p);
+    mkDust(p, 30, 160);
+    for(let i = 0; i < 12; i++) mkPuff(p, _mkV.set((Math.random()-0.5)*120, 20 + Math.random()*60, (Math.random()-0.5)*120), 1.2);
+    for(const t of titans){
+        if(t.state === 'DEAD') continue;
+        const d = Math.hypot(p.x - t.base.x, p.y - t.pos.y, p.z - t.base.z);
+        if(d > MK.blastR + t.r) continue;
+        _mkW.set(t.pos.x - p.x, 0, t.pos.z - p.z).normalize();
+        const was = t.state;
+        mkStress(MK.exciteGain*0.5);
+        damageTitan(t, _mkW.x*MK.blastKnock, 60, _mkW.z*MK.blastKnock, false, p, MK.blastDmg);
+        if(was !== 'DEAD' && t.state === 'DEAD') MKE.kills++;
+    }
+    if(MK.hurtPlayer && b.foe){
+        const d = p.distanceTo(player.pos);
+        if(d < MK.blastR){
+            const k = 1 - d/MK.blastR;
+            _mkW.subVectors(player.pos, p).normalize();
+            player.vel.addScaledVector(_mkW, MK.blastKnock*k); player.vel.y += 80*k;
+            if(k > 0.5 && player.tumble <= 0) startTumble(M.tumbleThresh*(0.7 + k), _mkW.clone());
+        }
+    }
+}
+function updateBananas(dt){
+    const gS = M.gravity*MK.gravScale, drag = Math.exp(-M.airDrag*dt);
+    for(const b of MKE.bananas){
+        if(!b.live) continue;
+        b.age += dt; b.fuse -= dt;
+        if(b.carrier){                                                    // an emu has it in its beak
+            if(!EMS.list.includes(b.carrier)){ b.carrier = null; }
+            else { emHead(b.carrier, b.pos); b.vel.copy(b.carrier.vel); b.mesh.position.copy(b.pos); b.mesh.rotation.y = b.carrier.yaw + Math.PI/2; if(b.fuse <= 0) bananaBoom(b); continue; }
+        }
+        if(b.rest){ b.mesh.position.copy(b.pos); if(b.fuse <= 0) bananaBoom(b); continue; }
+        b.vel.y += gS*dt; b.vel.x *= drag; b.vel.z *= drag;
+        b.pos.addScaledVector(b.vel, dt);
+        b.mesh.position.copy(b.pos); b.mesh.rotation.z += dt*9; b.mesh.rotation.y += dt*5;
+        b.bfl = (b.bfl || 0) + dt*(4 + 14/Math.max(0.2, b.fuse));
+        let hit = b.fuse <= 0;
+        if(!hit && b.age > 0.12){
+            if(b.pos.y <= floorY(b.pos.x, b.pos.z) + MK.bananaSize*0.5){
+                if(b.bait){ b.pos.y = floorY(b.pos.x, b.pos.z) + MK.bananaSize*0.5; b.vel.set(0, 0, 0); b.rest = true; continue; }   // bait sits there, fizzing
+                hit = true;
+            }
+            if(!hit) for(const s of staticsNear(b.pos.x, b.pos.z, 10)){
+                if(b.pos.y < s.baseY || b.pos.y > s.topY) continue;
+                if(Math.abs(b.pos.x - s.x) < s.hw && Math.abs(b.pos.z - s.z) < s.hd){ hit = true; break; }
+            }
+            if(!hit) for(const t of titans){
+                if(t.state === 'DEAD') continue;
+                if(b.pos.y > t.base.y && b.pos.y < t.base.y + t.H && Math.hypot(b.pos.x - t.base.x, b.pos.z - t.base.z) < t.r){ hit = true; break; }
+            }
+            if(!hit && MK.hurtPlayer && b.foe && b.pos.distanceTo(player.pos) < M.radius + MK.bananaSize + 4) hit = true;
+        }
+        if(hit) bananaBoom(b);
+    }
+}
+
+// ── place / reset ──
+function reseatMonkey(){
+    const s = getPlayerStart(), S = WORLD.scale, dx = -s[0], dz = -s[2], l = Math.hypot(dx, dz) || 1;
+    MKE.home.set(s[0] + dx/l*MK.homeDist*S, 0, s[2] + dz/l*MK.homeDist*S);
+    if(!MKE.built) buildMonkey();
+    for(const b of MKE.bananas){ b.live = false; b.mesh.visible = false; }
+    if(MKE.mount) monkeyDismount('quiet');
+    MKE.emuNear.clear(); MKE.emuTgt = null; MKE.emuT = 0; MKE.emuCD = 8; MKE.shyT = 0; MKE.baitT = 15;
+    monkeyDropRope(true); MKE.latch = null; MKE.ride = null; MKE.blind = 0;
+    MKE.halfH = MK.size*0.5;
+    MKE.pos.set(MKE.home.x, floorY(MKE.home.x, MKE.home.z) + MKE.halfH, MKE.home.z); MKE.vel.set(0, 0, 0);
+    MKE.face = Math.atan2(s[0] - MKE.home.x, s[2] - MKE.home.z); MKE.hx = Math.sin(MKE.face); MKE.hz = Math.cos(MKE.face);
+    MKE.omega = 0; MKE.hopT = 0; MKE.hopCD = 0.5; MKE.state = 'GO'; MKE.stT = 0; MKE.intent = 'ROAM'; MKE.target = null;
+    MKE.rec = MK.recStart; MKE.calm = 0; MKE.logicBias = 0; MKE.flowN = 0;
+    MKE.hiStreak = 0; MKE.hiCD = 0; MKE.cycleAcc = 0; MKE.thinkAcc = 0; MKE.glow = 0;
+    MKE.ropeCDt = 1; MKE.throwCDt = 2; MKE.rideCDt = 0; MKE.throwT = 0; MKE.rope.last = null; MKE.blindT = 0;
+    MKE.agit = 0; MKE.flare = 0; MKE.flareCDt = 10; MKE.tumble = 0; MKE.tumAng.set(0, 0, 0); MKE.tum.set(0, 0, 0);
+    MKE.wall.on = false; MKE.wall.t = 0; MKE.wall.cool = 0; MKE.tangleCDt = 0; MKE.lastHi = MKE.time; MKE.pTum = false;
+}
+
+// ── drift: deterministic harmonics (no randomness) ──
+function mkDrift(){
+    const t = MKE.time;
+    const ch = MK.chaosMid + MK.chaosAmp*(Math.sin(t*MK.chaosRate) + 0.5*Math.sin(t*MK.chaosRate*2.618 + 1.3))/1.5 - MKE.calm;
+    const lg = MK.logicMid + MK.logicAmp*(Math.cos(t*MK.logicRate) + 0.5*Math.sin(t*MK.logicRate*1.618 + 0.7))/1.5 + MKE.logicBias;
+    MKE.chaosRaw = ch;
+    MKE.chaos = Math.max(MK.chaosFloor, ch);
+    MKE.logic = THREE.MathUtils.clamp(lg, 0, 1.5);
+    const driftWild = THREE.MathUtils.clamp((MKE.chaos - MK.chaosFloor)/Math.max(0.05, MK.wildTop - MK.chaosFloor), 0, 1);
+    MKE.wild = !MK.buddy ? driftWild : MKE.flare > 0 ? 1 : THREE.MathUtils.clamp(driftWild*MK.driftShare + MKE.agit, 0, 1);
+}
+function monkeySpiral(){
+    monkeyDropRope(); MKE.latch = null; if(MKE.ride) monkeyEndRide(true);
+    MKE.state = 'SPIRAL'; MKE.stT = 0; MKE.spirals++;
+    MKE.omega = (mkHash(MKE.cycleN, 9) < 0.5 ? -1 : 1)*9;
+    showToast('monkey: death spiral');
+}
+function monkeyRecover(saved){
+    MKE.state = 'GO'; MKE.stT = 0;
+    MKE.calm = 0; MKE.rec = MK.recStart; MKE.hiStreak = 0; MKE.logicBias = 0.25; MKE.flowN = 0;
+    if(saved){ MKE.saves++; showToast('monkey saved'); }
+}
+// one V6 supervise() step
+function monkeyCycle(){
+    MKE.cycleN++;
+    if(MKE.state === 'SPIRAL') return;
+    if(MKE.chaosRaw >= MK.zoneLo && MKE.chaosRaw <= MK.zoneHi){
+        if(++MKE.flowN >= MK.zoneCount){ MKE.rec = Math.min(MK.recMax, MKE.rec + MK.zoneGain); MKE.flowN = 0; }
+    } else MKE.flowN = 0;
+    if(MKE.logic < MK.featherBelow){
+        const eff = MK.spiralChance + MK.spiralRisk*MKE.hiStreak;
+        if(mkHash(MKE.cycleN, 5) < eff){ monkeySpiral(); return; }
+        MKE.logicBias += MK.featherGain;
+    }
+    if(MKE.time - MKE.lastHi > MK.hiHold) MKE.hiStreak = 0;
+    MKE.rec = Math.max(MK.recStart, MKE.rec - MK.recDecay*MK.cycle);
+}
+function monkeyHighFive(){
+    MKE.hiStreak++; MKE.hiTotal++; MKE.lastHi = MKE.time; MKE.hiCD = MK.hiCooldown;
+    MKE.rec = Math.min(MK.recMax, MKE.rec + MK.hiRec);
+    MKE.logicBias += MK.hiLogic;
+    MKE.calm = Math.min(1, MKE.calm + MK.hiCalm);
+    MKE.bond = Math.min(1, MKE.bond + MK.bondHi);
+    MKE.agit = Math.max(0, MKE.agit - MK.hiCalm);
+    if(MKE.flare > 0) MKE.flare = Math.max(0.01, MKE.flare - MK.hiFlareCut);
+    MKE.glow = 1;
+    if(MKE.state === 'SPIRAL' && MK.hiSave) monkeyRecover(true);
+    player.vel.multiplyScalar(1 - MK.hiDrag); player.vel.y += MK.hiKick;
+    if(MK.hiRelease && grapple.trackTarget === MKE) releaseGrapple();
+    for(let i = 0, n = Math.round(14*MK.smokeScale); i < n; i++) mkPuff(MKE.hand, _mkV.set((Math.random()-0.5)*40, 14 + Math.random()*20, (Math.random()-0.5)*40), 0.8);
+    showToast('high five  x' + MKE.hiStreak);
+}
+
+// ── its own grapple: same pull law as yours (M.hookPull × dist/M.ropeNorm), no extra tricks ──
+function monkeyDropRope(silent){
+    const r = MKE.rope;
+    if(r.active && !silent) MKE.ropeCDt = MK.ropeCD/(0.5 + MKE.wild);
+    r.active = false; r.t = null;
+    if(MKE.ropeLine) MKE.ropeLine.visible = false;
+}
+function monkeyFireRope(type, t, anchor){
+    const r = MKE.rope;
+    r.active = true; r.type = type; r.t = t || null; r.time = 0;
+    r.anchor.copy(anchor);
+    if(MKE.ropeLine) MKE.ropeLine.visible = true;
+    MKE.hopCD = Math.min(MKE.hopCD, 0.2);
+    for(let i = 0, n = Math.round(8*MK.smokeScale); i < n; i++) mkPuff(anchor, _mkV.set((Math.random()-0.5)*24, 4 + Math.random()*16, (Math.random()-0.5)*24), 0.9);
+}
+function monkeyReach(){ return M.maxRopeDist*MK.reachScale*WORLD.scale; }
+// a trunk / pillar / wall top in the direction it wants to go, above it, within reach
+function monkeyPickAnchor(gx, gz){
+    const p = MKE.pos, reach = monkeyReach(), size = MK.size;
+    let dx = gx - p.x, dz = gz - p.z; const gl = Math.hypot(dx, dz) || 1; dx /= gl; dz /= gl;
+    const near = staticsNear(p.x, p.z, reach*0.8).slice();
+    let best = null, bestS = -Infinity;
+    for(const s of near){
+        if(s === MKE.rope.last) continue;
+        if(s.topY - s.baseY < size*3 || s.topY < p.y + size*2) continue;
+        const sx = s.x - p.x, sz = s.z - p.z, sd = Math.hypot(sx, sz);
+        if(sd < size*3 || sd > reach*0.8) continue;
+        const dot = (sx*dx + sz*dz)/sd;
+        if(dot < 0.15) continue;
+        const sc = dot*1000 - sd*0.2 + mkHash(Math.floor(s.x*0.1) + Math.floor(s.z*0.1), MKE.cycleN)*300;   // logic-free taste: a seeded wobble
+        if(sc > bestS){ bestS = sc; best = s; }
+    }
+    if(!best) return null;
+    MKE.rope.last = best;
+    const h = mkHash(MKE.cycleN, 21);
+    const y = Math.min(best.topY, Math.max(p.y + size*2, best.baseY + (best.topY - best.baseY)*(0.45 + 0.45*h)));
+    return _mkB.set(best.x, y, best.z);
+}
+function monkeyRopeStep(){
+    const r = MKE.rope; if(!r.active) return;
+    if(r.type === 'titan'){ if(!r.t || r.t.state === 'DEAD' || !titans.includes(r.t)){ monkeyDropRope(); return; } r.anchor.copy(r.t.pos); }
+    else if(r.type === 'player') r.anchor.copy(player.pos);
+}
+function monkeyRopeRelease(dt){
+    const r = MKE.rope; if(!r.active) return;
+    r.time += dt;
+    _mkW.subVectors(r.anchor, MKE.pos); const d = _mkW.length();
+    if(r.type === 'static'){
+        const passed = r.time > MK.ropeMin && MKE.vel.dot(_mkW) < 0;
+        if(passed || r.time > MK.ropeMax*(1.3 - 0.6*MKE.wild) || d < MK.size*1.2) monkeyDropRope();
+    } else if(r.time > MK.ropeMax*2.5 || d > monkeyReach()*1.3) monkeyDropRope();
+}
+
+// ── world-physics step: gravity, rope pull, drag, max speed, statics, titans, ground ──
+const _mkPrev = new THREE.Vector3();
+function monkeyPhysics(dt){
+    const p = MKE.pos, v = MKE.vel, r = MK.size*0.3, hh = MKE.halfH, W = MKE.wall, thr = M.tumbleThresh;
+    v.y += M.gravity*MK.gravScale*dt*(W.on ? M.wallRunGravity : 1);
+    const R = MKE.rope;
+    if(R.active){
+        _mkW.subVectors(R.anchor, p); const d = Math.max(1, _mkW.length()); _mkW.multiplyScalar(1/d);
+        v.addScaledVector(_mkW, M.hookPull*MK.pullScale*(d/M.ropeNorm)*dt);
+    }
+    v.x *= Math.exp(-M.airDrag*dt); v.z *= Math.exp(-M.airDrag*dt); v.y *= Math.exp(-M.airDrag*0.12*dt);
+    const spd = v.length(), cap = M.maxSpeed*MK.speedCap;
+    if(spd > cap) v.multiplyScalar(cap/spd);
+    _mkPrev.copy(p);
+    p.addScaledVector(v, dt);
+    let onTop = false; MKE.voxGround = false;
+    for(const s of staticsNear(p.x, p.z, r + 2)){
+        const bottom = p.y - hh, top = p.y + hh;
+        if(top < s.baseY || bottom > s.topY) continue;
+        const dx = p.x - s.x, dz = p.z - s.z, hw = s.hw + r, hd = s.hd + r;
+        if(Math.abs(dx) > hw || Math.abs(dz) > hd) continue;
+        const ox = hw - Math.abs(dx), oz = hd - Math.abs(dz), oy = s.topY - bottom;
+        if(v.y <= 0 && oy < ox && oy < oz){ const vi = -v.y; p.y = s.topY + hh; v.y = 0; onTop = true; if(vi > thr) mkTumble(vi); }
+        else if(ox < oz){ const vi = Math.abs(v.x); p.x += dx < 0 ? -ox : ox; if(vi > thr){ mkTumble(vi); v.x = -v.x*0.3; } else v.x = 0; }
+        else { const vi = Math.abs(v.z); p.z += dz < 0 ? -oz : oz; if(vi > thr){ mkTumble(vi); v.z = -v.z*0.3; } else v.z = 0; }
+    }
+    if(MKE.state !== 'LATCH') for(const t of titans){
+        if(t.state === 'DEAD') continue;
+        if(p.y - hh > t.base.y + t.H || p.y + hh < t.base.y) continue;
+        const dx = p.x - t.base.x, dz = p.z - t.base.z, d = Math.hypot(dx, dz) || 1, rr = t.r*0.9 + r;
+        if(d < rr){ p.x = t.base.x + dx/d*rr; p.z = t.base.z + dz/d*rr; const vo = v.x*dx/d + v.z*dz/d; if(vo < 0){ v.x -= dx/d*vo; v.z -= dz/d*vo; } }
+    }
+    // the structure: axis-by-axis so he slides along it; if he somehow starts inside, let him out
+    if(MK.structOn && nearStructure(p, MK.size*3)){
+      if(mkBlocked(_mkPrev, r*0.8, hh*0.8)){ p.y = _mkPrev.y + 600*dt; v.y = Math.max(v.y, 60); }      // somehow inside it: pop out the top
+      else {
+        const nx = p.x, ny = p.y, nz = p.z;
+        p.set(nx, _mkPrev.y, _mkPrev.z);
+        if(mkBlocked(p, r, hh)){ const vi = Math.abs(v.x); p.x = _mkPrev.x; if(vi > thr){ mkTumble(vi); v.x = -v.x*0.3; } else v.x = 0; }
+        p.z = nz;
+        if(mkBlocked(p, r, hh)){ const vi = Math.abs(v.z); p.z = _mkPrev.z; if(vi > thr){ mkTumble(vi); v.z = -v.z*0.3; } else v.z = 0; }
+        p.y = ny;
+        if(mkBlocked(p, r, hh)){ const vi = Math.abs(v.y); p.y = _mkPrev.y; if(v.y < 0){ MKE.voxGround = true; if(vi > thr) mkTumble(vi); } v.y = 0; }
+      }
+    }
+    { const hd = Math.hypot(p.x, p.z), lim = WORLD.half;
+      if(hd > lim){ const nx = p.x/hd, nz = p.z/hd; p.x = nx*lim; p.z = nz*lim; const vo = v.x*nx + v.z*nz; if(vo > 0){ v.x -= nx*vo; v.z -= nz*vo; } } }
+    const gY = floorY(p.x, p.z) + hh;
+    if(p.y <= gY){
+        const vi = -v.y; p.y = gY; if(v.y < 0) v.y = 0;
+        if(vi > thr*1.4) mkTumble(vi);
+        v.x *= Math.exp(-M.groundFric*dt); v.z *= Math.exp(-M.groundFric*dt);
+    }
+    MKE.grounded = p.y <= gY + 0.5 || onTop || MKE.voxGround;
+
+    // wall run (waaa_5 rules, same constants as yours): airborne + brushing a wall + moving along it fast enough = he catches it,
+    // gravity eases, he hugs it; when the run runs out he kicks off like a wall jump
+    if(W.cool > 0) W.cool -= dt;
+    if(MKE.grounded) W.t = 0;
+    if(MK.wallOn && MKE.tumble <= 0){
+        const px = p.x, py = p.y, pz = p.z, reach = r + 12;
+        const hit = (dx, dz) => { for(let k = r + 0.9; k <= reach + 1e-6; k += 1.5) if(solidAt(px + dx*k, py, pz + dz*k)) return true; return false; };
+        let bx = 0, bz = 0;
+        if(hit(1, 0)) bx = -1; else if(hit(-1, 0)) bx = 1;
+        if(hit(0, 1)) bz = -1; else if(hit(0, -1)) bz = 1;
+        let wnx = 0, wnz = 0, along = 0;
+        if(bx && Math.abs(v.z) > along){ wnx = bx; wnz = 0; along = Math.abs(v.z); }
+        if(bz && Math.abs(v.x) > along){ wnx = 0; wnz = bz; along = Math.abs(v.x); }
+        const canRun = !MKE.grounded && (wnx || wnz) && along > M.wallRunMinSpeed && W.cool <= 0 && W.t < M.wallRunTime;
+        if(canRun){
+            if(!W.on) v.y = Math.max(v.y*0.3, 0);
+            if(W.nx !== wnx || W.nz !== wnz) W.t = 0;
+            W.on = true; W.nx = wnx; W.nz = wnz; W.t += dt;
+            const into = v.x*wnx + v.z*wnz; if(into < 0){ v.x -= into*wnx; v.z -= into*wnz; }
+            v.x -= wnx*M.wallStick*dt; v.z -= wnz*M.wallStick*dt;
+        } else if(W.on){
+            W.on = false;
+            if(W.t >= M.wallRunTime){ v.x += W.nx*M.wallJumpOut; v.z += W.nz*M.wallJumpOut; v.y += M.wallJumpUp; W.cool = 0.25; W.t = 0; MKE.wallJumps++; }
+        }
+    } else W.on = false;
+
+    if(MKE.ropeLine && R.active){
+        const a = MKE.ropeLine.geometry.attributes.position.array;
+        a[0] = p.x; a[1] = p.y; a[2] = p.z; a[3] = R.anchor.x; a[4] = R.anchor.y; a[5] = R.anchor.z;
+        MKE.ropeLine.geometry.attributes.position.needsUpdate = true;
+    }
+}
+
+// ── what it wants to be doing (re-picked every MK.think seconds) ──
+function monkeyNearestTitan(maxD){
+    let best = null, bd = maxD;
+    for(const t of titans){ if(t.state === 'DEAD') continue; const d = Math.hypot(t.base.x - MKE.pos.x, t.base.z - MKE.pos.z); if(d < bd){ bd = d; best = t; } }
+    return best;
+}
+function monkeyThink(){
+    const S = WORLD.scale, w = MKE.wild;
+    const pd = Math.hypot(player.pos.x - MKE.pos.x, player.pos.z - MKE.pos.z);
+    let intent = 'ROAM', target = null;
+    if(!MK.buddy){                                                       // the old always-chaotic monkey
+        const ti = monkeyNearestTitan(MK.titanRange*S);
+        if(w >= MK.huntAt && MKE.rideCDt <= 0 && pd < MK.huntRange*S && player.tumble <= 0){ intent = 'HUNT'; }
+        else if(w >= MK.titanAt && ti && MKE.logic > 0.1){ intent = 'TITAN'; target = ti; }
+        else if(w < MK.titanAt && pd < MK.notice*S && MKE.logic > 0.35){ intent = 'FRIEND'; }
+    } else if(MKE.flare > 0){                                            // flare: feral for a few seconds
+        const ti = monkeyNearestTitan(MK.titanRange*S);
+        if(MKE.state === 'MOUNT' || (MKE.flareEmu && mkEmuWant(true))){ intent = 'EMU'; target = MKE.mount || MKE.emuTgt; }
+        else if(MKE.rideCDt <= 0 && pd < MK.huntRange*S && player.tumble <= 0) intent = 'HUNT';
+        else if(ti && MKE.logic > 0.1){ intent = 'TITAN'; target = ti; }
+        else intent = 'BUDDY';
+    } else {                                                             // ally: stay beside you, flank any titan that's close to YOU
+        let ti = null, bd = MK.assistRange*S*(1 + 0.5*MKE.bond);
+        for(const t of titans){ if(t.state === 'DEAD') continue; const d = Math.hypot(t.base.x - player.pos.x, t.base.z - player.pos.z); if(d < bd){ bd = d; ti = t; } }
+        const nerve = 1 - 0.7*MK.timid + 0.3*MK.bold;                  // timid: hangs back unless the titan is right on you
+        if(ti && MKE.logic > 0.1 && (bd < 500*S || mkHash(Math.floor(MKE.time/5), 81) < nerve)){ intent = 'TITAN'; target = ti; }
+        else if(mkEmuWant(false)){ intent = 'EMU'; target = MKE.mount || MKE.emuTgt; }
+        else intent = 'BUDDY';
+        if(MKE.state === 'MOUNT' && intent === 'TITAN') monkeyDismount('hop');      // off the bird, onto the titan
+    }
+    MKE.intent = intent; MKE.target = target;
+}
+// a spot beside you, a little ahead of where you're going (also where a steady emu ride heads)
+function mkBuddySpot(){
+    const S = WORLD.scale, v = player.vel, sp = Math.hypot(v.x, v.z); let fx, fz;
+    if(sp > 30){ fx = v.x/sp; fz = v.z/sp; } else { camera.getWorldDirection(_mkF); const l = Math.hypot(_mkF.x, _mkF.z) || 1; fx = _mkF.x/l; fz = _mkF.z/l; }
+    const side = MK.followSide*S*(1 - 0.5*MKE.bond), lead = Math.min(400*S, sp*MK.followLead);
+    return _mkF.set(player.pos.x - fz*side + fx*lead, player.pos.y, player.pos.z + fx*side + fz*lead);
+}
+function monkeyGoal(){
+    const S = WORLD.scale, ep = Math.floor(MKE.time/9);
+    if(MKE.intent === 'HUNT') return _mkF.copy(player.pos);
+    if(MKE.intent === 'TITAN' && MKE.target) return _mkF.copy(MKE.target.pos);
+    if(MKE.intent === 'BUDDY') return mkBuddySpot();
+    if(MKE.intent === 'EMU' && MKE.emuTgt) return _mkF.set(MKE.emuTgt.pos.x, MKE.emuTgt.pos.y + emH(MKE.emuTgt)*0.8, MKE.emuTgt.pos.z);
+    if(MKE.intent === 'FRIEND') return _mkF.copy(player.pos);
+    return _mkF.set(MKE.home.x + MK.roam*S*(mkHash(ep, 1)*2 - 1), 0, MKE.home.z + MK.roam*S*(mkHash(ep, 2)*2 - 1));
+}
+
+// ── latch on a titan and bite ──
+function monkeyStartLatch(t){
+    monkeyDropRope();
+    MKE.state = 'LATCH'; MKE.stT = 0;
+    const behind = MKE.logic > 0.5 && mkHash(MKE.cycleN, 31) < MK.napeChance;    // logic = goes for the weak spot
+    MKE.latch = { t, time:0, biteT:0.4, ang:behind ? t.yaw + Math.PI : Math.atan2(MKE.pos.x - t.base.x, MKE.pos.z - t.base.z), h:0.25 + 0.6*mkHash(MKE.cycleN, 32), nape:behind };
+    MKE.vel.set(0, 0, 0);
+}
+function monkeyEndLatch(){
+    const L = MKE.latch; MKE.state = 'GO'; MKE.latch = null;
+    if(L && L.t){ _mkW.set(MKE.pos.x - L.t.base.x, 0, MKE.pos.z - L.t.base.z).normalize(); MKE.vel.set(_mkW.x*MK.leap, MK.leap*0.9, _mkW.z*MK.leap); }
+    MKE.ropeCDt = MK.ropeCD; MKE.hopCD = 0.6; MKE.throwCDt = Math.min(MKE.throwCDt, 0.6);
+}
+function monkeyLatchStep(dt){
+    const L = MKE.latch, t = L && L.t;
+    if(!t || t.state === 'DEAD' || !titans.includes(t)){ monkeyEndLatch(); return; }
+    L.time += dt; L.ang += dt*0.5*MKE.wild;
+    let tx, ty, tz;
+    if(L.nape && t.P.nape){ t.P.nape.getWorldPosition(_mkW); tx = _mkW.x; ty = _mkW.y; tz = _mkW.z; }
+    else { const rr = t.r*0.95 + MK.size*0.2; tx = t.base.x + Math.sin(L.ang)*rr; tz = t.base.z + Math.cos(L.ang)*rr; ty = t.base.y + t.H*L.h; }
+    const k = Math.min(1, dt*10), ox = MKE.pos.x, oy = MKE.pos.y, oz = MKE.pos.z;
+    MKE.pos.x += (tx - ox)*k; MKE.pos.y += (ty - oy)*k; MKE.pos.z += (tz - oz)*k;
+    MKE.vel.set(0, 0, 0); MKE.grounded = false;
+    L.biteT -= dt;
+    if(L.biteT <= 0){
+        L.biteT = MK.biteCD/(0.5 + MKE.wild);
+        const nape = !!(L.nape || (t.P.nape && mkHash(MKE.bites + 7, 33) < MK.napeChance*THREE.MathUtils.clamp(MKE.logic, 0, 1)));
+        _mkW.set(t.base.x - MKE.pos.x, 0, t.base.z - MKE.pos.z).normalize();
+        const was = t.state;
+        damageTitan(t, _mkW.x*90, 30, _mkW.z*90, nape, MKE.pos, MK.biteDmg*monkeyBiteMul());
+        if(was !== 'DEAD' && t.state === 'DEAD') MKE.kills++;
+        MKE.bites++; MKE.glow = 0.6; MKE.throwT = 0.2; mkStress(MK.exciteGain);
+        if(MK.dustScale > 0) mkDust(MKE.pos, Math.round(6*MK.dustScale), 50);
+    }
+    MKE.face = mkWrap(MKE.face + mkWrap(Math.atan2(t.base.x - MKE.pos.x, t.base.z - MKE.pos.z) - MKE.face)*Math.min(1, dt*10));
+    if(L.time >= MK.latchTime*(0.6 + MKE.wild)) monkeyEndLatch();
+}
+
+// ── hunt you down and ride your back ──
+function monkeyStartRide(){
+    monkeyDropRope();
+    MKE.state = 'RIDE'; MKE.stT = 0; MKE.rides++;
+    MKE.ride = { time:0, shake:0, jostle:1.2, blindCD:2 };
+    MKE.blindT = 0;
+    showToast('monkey on your back');
+}
+function monkeyEndRide(quiet){
+    const R = MKE.ride; MKE.ride = null; if(MKE.state === 'RIDE') MKE.state = 'GO';
+    camera.getWorldDirection(_mkF); _mkF.y = 0; _mkF.normalize();
+    MKE.vel.copy(player.vel).multiplyScalar(0.3); MKE.vel.x -= _mkF.x*80; MKE.vel.z -= _mkF.z*80; MKE.vel.y += 60;
+    MKE.rideCDt = MK.rideCD; MKE.ropeCDt = MK.ropeCD; MKE.hopCD = 0.8; MKE.blindT = 0;
+    if(!quiet) showToast(R && R.shake >= MK.shakeTime ? 'shook it off' : 'monkey hopped off');
+}
+function monkeyRideStep(dt){
+    const R = MKE.ride;
+    R.time += dt;
+    camera.getWorldDirection(_mkF); _mkF.y = 0; const fl = Math.hypot(_mkF.x, _mkF.z) || 1; _mkF.x /= fl; _mkF.z /= fl;
+    const bx = -_mkF.x*(M.radius + MK.size*0.3), bz = -_mkF.z*(M.radius + MK.size*0.3);
+    const k = Math.min(1, dt*14);
+    MKE.pos.x += (player.pos.x + bx - MKE.pos.x)*k; MKE.pos.z += (player.pos.z + bz - MKE.pos.z)*k;
+    MKE.pos.y += (player.pos.y + MK.size*0.12 - MKE.pos.y)*k;
+    MKE.vel.copy(player.vel); MKE.grounded = false;
+    MKE.face = mkWrap(MKE.face + mkWrap(Math.atan2(_mkF.x, _mkF.z) - MKE.face)*Math.min(1, dt*10));
+    // it's heavy, it's in the way, it's grabbing at you
+    player.vel.multiplyScalar(Math.exp(-MK.rideDrag*dt));
+    player.vel.y += M.gravity*MK.rideWeight*dt;
+    R.jostle -= dt;
+    if(R.jostle <= 0 && player.tumble <= 0){ R.jostle = 1.5/(0.5 + MKE.wild); player.yaw += (mkHash(Math.floor(MKE.time*5), 41)*2 - 1)*MK.rideJostle*(0.4 + MKE.wild); }
+    R.blindCD -= dt;
+    if(R.blindCD <= 0){ R.blindCD = 3/(0.5 + MKE.wild); MKE.blindT = 1.2; }          // paws over your eyes
+    MKE.blindT = Math.max(0, MKE.blindT - dt);
+    MKE.blind = MK.rideBlind*Math.sin(Math.PI*(1 - MKE.blindT/1.2))*(MKE.blindT > 0 ? 1 : 0);
+    // get it off: stay fast, or crash
+    const spd = player.vel.length();
+    if(spd > MK.shakeSpeed) R.shake += dt; else R.shake = Math.max(0, R.shake - dt*0.5);
+    if(R.shake >= MK.shakeTime || player.tumble > 0 || R.time >= MK.rideTime*(0.6 + MKE.wild)) monkeyEndRide(false);
+}
+
+// ── emus: curiosity sends him over; whether he gets a ride (and what kind) is down to both their moods ──
+function monkeyEmuPick(maxD){                                           // the emu he's spent the most time near, else the nearest
+    let best = null, bv = 1;
+    for(const [o, v] of MKE.emuNear){
+        if(v <= bv || o.age < 1 || o.ride || !EMS.list.includes(o)) continue;
+        if(Math.hypot(o.pos.x - MKE.pos.x, o.pos.z - MKE.pos.z) > maxD) continue;
+        best = o; bv = v;
+    }
+    if(best) return best;
+    let bd = maxD;
+    for(const o of EMS.list){ if(o.age < 1 || o.ride) continue; const d = Math.hypot(o.pos.x - MKE.pos.x, o.pos.z - MKE.pos.z); if(d < bd){ bd = d; best = o; } }
+    return best;
+}
+function mkEmuWant(flare){
+    if(typeof EM === 'undefined' || !EM.on || !EMS.list.length) return false;
+    if(MKE.state === 'MOUNT') return true;
+    if(MKE.shyT > 0 || MKE.state !== 'GO') return false;
+    if(MKE.emuT > 0 && MKE.emuTgt && EMS.list.includes(MKE.emuTgt) && !MKE.emuTgt.ride) return true;
+    if(MKE.emuCD > 0 && !flare) return false;
+    if(!flare && mkHash(++MKE.emuRolls, 83) >= MK.curious*0.12) return false;
+    const S = WORLD.scale, leash = (600 + 1600*MK.curious)*S;
+    const e = monkeyEmuPick(leash);
+    if(!e || Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) > leash*1.6) return false;
+    MKE.emuTgt = e; MKE.emuT = 8 + 12*MK.curious;
+    return true;
+}
+function monkeyTryMount(e){
+    MKE.mountTries = (MKE.mountTries || 0) + 1;
+    const fam = Math.min(1, (MKE.emuNear.get(e) || 0)/6), flare = MKE.flare > 0;
+    const nerve = 0.15 + MK.bold*0.6 - MK.timid*0.5 + fam*0.45 + (flare ? 0.35 : 0) + MK.playful*0.15;
+    if(e.ride || e.age < 1 || e.tumble > 0 || mkHash(MKE.mounts*7 + MKE.cycleN, 71) > nerve){         // loses his nerve: a sniff and a poke, then back to you
+        MKE.emuT = 0; MKE.emuTgt = null; MKE.emuCD = 6 + 10*MK.timid;
+        e.annoy = Math.min(1, e.annoy + (flare ? 0.3 : 0.05)*e.tr.bold);
+        MKE.vel.y = Math.max(MKE.vel.y, 60); MKE.hopCD = 0.5;
+        return false;
+    }
+    const calmM = !flare && MKE.agit < 0.6, calmE = e.panic <= 0 && e.annoy < 0.4;
+    monkeyDropRope(true);
+    MKE.state = 'MOUNT'; MKE.mount = e; MKE.stT = 0; MKE.mounts++; MKE.emuT = 0;
+    e.ride = { mode:'STEADY', t:0, dur:EM.rideTime*(0.6 + 0.8*MK.playful) };
+    if(calmM && calmE){ EMS.steady++; showToast('monkey is riding an emu'); }
+    else emRideWild(e);
+    return true;
+}
+function monkeyDismount(how){
+    const e = MKE.mount; MKE.mount = null;
+    if(MKE.state === 'MOUNT') MKE.state = 'GO';
+    MKE.emuTgt = null; MKE.emuT = 0; MKE.emuCD = 10 + 10*MK.timid; MKE.ropeCDt = MK.ropeCD; MKE.hopCD = 0.6;
+    if(!e){ return; }
+    const was = e.ride ? e.ride.mode : 'STEADY'; e.ride = null;
+    const fx = Math.sin(e.yaw), fz = Math.cos(e.yaw), S = WORLD.scale;
+    if(how === 'quiet'){ MKE.vel.set(0, 0, 0); return; }
+    if(how === 'hop'){ MKE.vel.copy(e.vel); MKE.vel.y += 90; }
+    else if(how === 'thrown'){                                          // over the neck when it bolts, stops or gets bonked
+        MKE.vel.set(e.vel.x*1.1 + fx*120*S, 90, e.vel.z*1.1 + fz*120*S); MKE.grounded = false;
+        mkTumble(M.tumbleThresh*1.2); mkStress(MK.stressGain*0.6); MKE.shyT = 1.5 + 4*MK.timid;
+    } else {                                                            // bucked: launched up and back off its rump
+        const k = EM.kick*e.tr.kick;
+        MKE.vel.set(-fx*k*0.5, k*0.45 + 50, -fz*k*0.5); MKE.grounded = false;
+        mkTumble(M.tumbleThresh*1.4); mkStress(MK.stressGain*(0.5 + MK.timid)); MKE.shyT = 2 + 6*MK.timid;
+        e.annoy = Math.min(1, e.annoy + 0.3);
+    }
+    if(was !== 'STEADY') emToast(how === 'buck' ? 'bucked off' : 'monkey went flying');
+}
+function monkeyMountStep(dt){
+    const e = MKE.mount;
+    if(!e || !e.ride || !EMS.list.includes(e) || !EM.on){ monkeyDismount('quiet'); return; }
+    const h = emH(e), fx = Math.sin(e.yaw), fz = Math.cos(e.yaw);
+    MKE.pos.set(e.pos.x - fx*h*0.08, e.pos.y + h*0.86 + MKE.halfH*0.55, e.pos.z - fz*h*0.08);
+    MKE.vel.copy(e.vel); MKE.grounded = false; MKE.stT += dt;
+    MKE.face = mkWrap(e.yaw + (e.ride.mode !== 'STEADY' ? Math.sin(MKE.time*9)*0.4 : 0));
+}
+
+// ── ground / air travel toward the goal ──
+function monkeyTravel(dt, goal){
+    const p = MKE.pos, v = MKE.vel, S = WORLD.scale, w = MKE.wild, intent = MKE.intent;
+    let dx = goal.x - p.x, dz = goal.z - p.z; const dist = Math.hypot(dx, dz) || 1; dx /= dist; dz /= dist;
+    const jit = (mkHash(Math.floor(MKE.time*3), 3)*2 - 1)*w*1.6*(1 - 0.7*THREE.MathUtils.clamp(MKE.logic, 0, 1));     // chaos jitters the heading, logic holds it
+    const c = Math.cos(jit), s = Math.sin(jit), hx = dx*c - dz*s, hz = dx*s + dz*c;
+    const e = 1 - 1/Math.max(1, MKE.rec), kk = Math.pow(e, dt*60);                                                      // recursion = echo of its last heading
+    MKE.hx = MKE.hx*kk + hx*(1 - kk); MKE.hz = MKE.hz*kk + hz*(1 - kk);
+    const hl = Math.hypot(MKE.hx, MKE.hz) || 1; MKE.hx /= hl; MKE.hz /= hl;
+    const slow = intent === 'FRIEND' ? THREE.MathUtils.clamp((dist - MK.keepAway*S)/(MK.keepAway*S), 0, 1)
+        : intent === 'BUDDY' ? THREE.MathUtils.clamp((dist - MK.followDist*S*0.4)/(MK.followDist*S*0.6), 0, 1) : 1;
+    const tumbling = MKE.tumble > 0;
+
+    // rope: straight at a titan / you when it's hunting them, otherwise tree to tree
+    const R = MKE.rope;
+    if(!tumbling && !R.active && MKE.ropeCDt <= 0 && (w >= MK.swingAt || (MK.buddy && MKE.flare <= 0))){
+        const dist3 = p.distanceTo(goal), reach = monkeyReach();
+        if(intent === 'HUNT' && dist3 < reach && dist3 > MK.size*3) monkeyFireRope('player', null, goal);
+        else if(intent === 'TITAN' && MKE.target && dist3 < reach && dist3 > MK.size*3) monkeyFireRope('titan', MKE.target, goal);
+        else if(dist > (intent === 'BUDDY' ? MK.followDist*3 : MK.swingMin)*S){ const a = monkeyPickAnchor(goal.x, goal.z); if(a) monkeyFireRope('static', null, a); }
+    }
+
+    // close to the emu he's after: pounce onto its back, leading it (instead of a normal hop)
+    MKE.pounceCD = (MKE.pounceCD || 0) - dt;
+    if(!tumbling && intent === 'EMU' && MKE.emuTgt && MKE.state === 'GO' && MKE.grounded && MKE.pounceCD <= 0 && !R.active){
+        const e = MKE.emuTgt, h = emH(e);
+        if(Math.hypot(p.x - e.pos.x, p.z - e.pos.z) < h*3 + MK.size){
+            const T = 0.55, g = M.gravity*MK.gravScale;
+            const tx = e.pos.x + e.vel.x*T, tz = e.pos.z + e.vel.z*T, ty = e.pos.y + h*0.9 + MKE.halfH*0.5;
+            v.set((tx - p.x)/T, (ty - p.y - 0.5*g*T*T)/T, (tz - p.z)/T);
+            MKE.pounceCD = 1.2; MKE.hopCD = 1.2;
+            if(MK.dustScale > 0){ _mkSp.set(p.x, p.y - MKE.halfH, p.z); mkDust(_mkSp, Math.round(5*MK.dustScale), 30); }
+        }
+    }
+    // hop (jump height from the world's gravity)
+    MKE.hopCD -= dt;
+    if(!tumbling && MKE.grounded && MKE.hopCD <= 0 && slow > 0.05){
+        const vy = Math.sqrt(2*Math.abs(M.gravity)*MK.gravScale*MK.hopHeight*(0.5 + w));
+        v.y = vy; v.x += MKE.hx*MK.hopSpeed*(0.7 + 0.8*w)*slow; v.z += MKE.hz*MK.hopSpeed*(0.7 + 0.8*w)*slow;
+        MKE.hopCD = MK.hopEvery/(0.5 + w);
+        if(MK.dustScale > 0){ _mkSp.set(p.x, p.y - MKE.halfH, p.z); mkDust(_mkSp, Math.round(5*MK.dustScale), 30); }
+    }
+    const acc = (MKE.grounded ? M.accelGround : M.accelAir)*MK.accelScale*slow*(tumbling ? 0 : 1);
+    v.x += MKE.hx*acc*dt; v.z += MKE.hz*acc*dt;
+    if(intent === 'EMU' && !tumbling && !R.active){                     // chasing a bird on foot: bleed off the speed he carried in from flying with you
+        const want = Math.min(M.maxSpeed*MK.speedCap, dist*1.2 + 40), k = Math.min(1, dt*(MKE.grounded ? 6 : 1.5));
+        v.x += (dx*want - v.x)*k; v.z += (dz*want - v.z)*k;
+    }
+
+    monkeyPhysics(dt);
+    monkeyRopeStep(); monkeyRopeRelease(dt);
+
+    // contact: latch a titan / climb you
+    if(!tumbling && MKE.state === 'GO' && intent === 'TITAN' && MKE.target){
+        const t = MKE.target;
+        if(t.state !== 'DEAD' && p.y > t.base.y && p.y < t.base.y + t.H && Math.hypot(p.x - t.base.x, p.z - t.base.z) < t.r*0.9 + MK.size*0.3 + MK.size*0.15) monkeyStartLatch(t);
+    }
+    if(!tumbling && MKE.state === 'GO' && intent === 'EMU' && MKE.emuTgt){
+        const e = MKE.emuTgt, h = emH(e), d2 = Math.hypot(p.x - e.pos.x, p.z - e.pos.z);
+        if(d2 < h*0.5 + MK.size*0.45 && p.y > e.pos.y + h*0.1 && p.y < e.pos.y + h*2) monkeyTryMount(e);
+    }
+    if(MKE.state === 'GO' && intent === 'HUNT' && player.tumble <= 0 && MKE.rideCDt <= 0){
+        if(p.distanceTo(player.pos) < M.radius + MK.size*MK.climbDist) monkeyStartRide();
+    }
+}
+
+// ── throw bombnanas: at you while hunting, at titans otherwise ──
+function monkeyMaybeThrow(dt){
+    MKE.throwCDt -= dt;
+    if(MKE.throwCDt > 0 || MKE.state === 'SPIRAL' || MKE.state === 'LATCH' || MKE.tumble > 0) return;
+    const ally = MK.buddy && MKE.flare <= 0;
+    MKE.baitT -= dt;
+    if(ally && MK.playful > 0 && EM.on && MKE.baitT <= 0 && MKE.intent !== 'TITAN' && MKE.state !== 'MOUNT'){   // playful: lob a dud-fused bombnana for the emus to find
+        MKE.baitT = 30/(0.15 + MK.playful);
+        let be = null, bd = MK.throwRange*WORLD.scale*0.8;
+        for(const e of EMS.list){ if(e.age < 1 || e.ride || e.tr.bold < 0.3) continue; const d = MKE.pos.distanceTo(e.pos); if(d < bd && d > MK.throwMin*2){ bd = d; be = e; } }
+        if(be){
+            _mkB.set(be.pos.x + (MKE.pos.x - be.pos.x)*0.3, floorY(be.pos.x, be.pos.z), be.pos.z + (MKE.pos.z - be.pos.z)*0.3);
+            const b = throwBanana(_mkB, null); if(b){ b.bait = true; b.foe = false; b.fuse = MK.fuse*2.5; MKE.throwCDt = 2; return; }
+        }
+    }
+    if(ally){ if(!MK.buddyThrow || MKE.intent !== 'TITAN' || !MKE.target) return; }      // allies only throw at the titan you're fighting
+    else if(MKE.wild < MK.throwAt) return;
+    let tp = null, tv = null;
+    if(ally){ const t = MKE.target; if(t && t.state !== 'DEAD'){ tp = t.pos; tv = t.vel; } }
+    else if(MKE.intent === 'HUNT' && MKE.state !== 'RIDE'){ tp = player.pos; tv = player.vel; }
+    else if(MKE.intent === 'EMU' && MKE.emuTgt && MKE.state !== 'MOUNT'){ tp = MKE.emuTgt.pos; tv = MKE.emuTgt.vel; }     // mid-flare he'll bomb his own ride
+    else { const t = monkeyNearestTitan(MK.throwRange*WORLD.scale); if(t){ tp = t.pos; tv = t.vel; } }
+    if(!tp) return;
+    const d = MKE.pos.distanceTo(tp);
+    if(d < MK.throwMin || d > MK.throwRange*WORLD.scale) return;
+    if(throwBanana(tp, tv)) MKE.throwCDt = ally ? MK.buddyThrowEvery : MK.throwEvery/(0.3 + 1.7*MKE.wild);
+}
+
+// ── pose: one set of joint angles drives both the box monkey and a loaded model's rig ──
+const _mkP = { hy:0, hp:0, aL:0, aR:0, lL:0, lR:0 };
+function monkeyPose(dt, spiral, feet){
+    const size = MK.size, A = MKE.arms, root = MKE.root, sp = Math.hypot(MKE.vel.x, MKE.vel.z), P = _mkP;
+    root.position.set(MKE.pos.x, feet, MKE.pos.z);
+    root.scale.setScalar(size);
+    root.rotation.y = MKE.face;
+    MKE.gait += dt*(2 + Math.min(10, sp*0.05));
+    const roped = MKE.rope.active;
+    const want = (!MKE.inspect && !spiral && (MKE.state === 'GO' || MKE.state === 'MOUNT') && MKE.tumble <= 0 && (MKE.intent === 'FRIEND' || MKE.intent === 'BUDDY' || MKE.state === 'MOUNT') && MKE.hand.distanceTo(player.pos) < MK.hiReach*4) ? 1 : 0;
+    MKE.raise += (want - MKE.raise)*Math.min(1, dt*8);
+    MKE.glow = Math.max(0, MKE.glow - dt*2);
+    MKE.throwT = Math.max(0, MKE.throwT - dt);
+    P.hy = 0; P.hp = THREE.MathUtils.clamp(-MKE.vel.y*0.004, -0.35, 0.35);
+    if(spiral){
+        MKE.tilt.rotation.set(MKE.stT*5, 0, Math.sin(MKE.stT*7)*0.9);
+        P.aL = MKE.time*12; P.aR = -MKE.time*12;
+        P.lL = Math.sin(MKE.time*14)*0.9; P.lR = -Math.sin(MKE.time*14)*0.9;
+        P.hy = Math.sin(MKE.time*9)*0.5;
+    } else if(MKE.tumble > 0){
+        const e = Math.min(1, MKE.tumble/0.25);
+        MKE.tilt.rotation.set(MKE.tumAng.x*e, MKE.tumAng.y*e, MKE.tumAng.z*e);
+        P.aL = Math.sin(MKE.time*16)*1.3; P.aR = -Math.sin(MKE.time*16)*1.3; P.lL = Math.sin(MKE.time*13)*0.9; P.lR = -Math.sin(MKE.time*13)*0.9;
+    } else {
+        MKE.tilt.rotation.set(MKE.grounded ? 0 : 0.25, 0, 0);
+        if(MKE.state === 'LATCH'){ P.aL = P.aR = -1.4; P.lL = P.lR = -0.6; P.hp = 0.3*Math.sin(MKE.time*9); }
+        else if(MKE.state === 'RIDE'){ P.aL = P.aR = -1.8; P.lL = P.lR = -0.9; }
+        else if(MKE.state === 'MOUNT'){ const wild = MKE.mount && MKE.mount.ride && MKE.mount.ride.mode !== 'STEADY';
+            P.aL = wild ? -2.4 + Math.sin(MKE.time*15)*0.8 : -1.1; P.aR = wild ? -2.4 - Math.sin(MKE.time*15)*0.8 : -1.1 - MKE.raise*1.2; P.lL = P.lR = -1.2; P.hy = wild ? Math.sin(MKE.time*11)*0.5 : 0; }
+        else if(roped){ P.aL = P.aR = -Math.PI*0.88; P.lL = P.lR = 0.3; }
+        else {
+            P.aL = -Math.sin(MKE.gait)*0.5;
+            P.aR = -MKE.raise*Math.PI*0.85 + (1 - MKE.raise)*Math.sin(MKE.gait)*0.5;
+            P.lL = MKE.grounded ? 0 : 0.6 + Math.sin(MKE.gait)*0.2; P.lR = MKE.grounded ? 0 : 0.6 - Math.sin(MKE.gait)*0.2;
+            P.hy = Math.sin(MKE.time*3)*0.12*MKE.wild;
+        }
+        if(MKE.throwT > 0) P.aR = THREE.MathUtils.lerp(-2.8, 0.7, 1 - MKE.throwT/0.35);
+    }
+    // rig test sliders (0 = off): raise the hand arm / run a gait cycle so the rig can be checked without playing
+    if(MK.rigTest > 0) P.aR = THREE.MathUtils.lerp(P.aR, -2.6, MK.rigTest);
+    if(MK.rigGait > 0){ const gs = Math.sin(MKE.gait*1.5)*MK.rigGait; P.aL = -gs*1.0; P.aR = gs*1.0; P.lL = gs*0.9; P.lR = -gs*0.9; }
+    if(MKE.custom) mkRigApply(P);
+    else { A.armL.rotation.x = P.aL; A.armR.rotation.x = P.aR; A.legL.rotation.x = P.lL; A.legR.rotation.x = P.lR; }
+    A.tail.rotation.x = 0.5 + Math.sin(MKE.gait*0.5)*0.25*MKE.chaos;
+    const gl = MKE.glow, g = MK_COL.gold;
+    MKE.mHand.emissive.setRGB(g[0]*gl, g[1]*gl, g[2]*gl);
+}
+// inspect: park it in front of the camera, facing you, nothing moves unless a test slider is up
+function monkeyInspect(dt){
+    if(MKE.mount) monkeyDismount('quiet');
+    camera.getWorldDirection(_mkF);
+    MKE.pos.copy(player.pos).addScaledVector(_mkF, MK.size*MK.inspectDist);
+    MKE.vel.set(0, 0, 0); MKE.grounded = true; MKE.state = 'GO'; MKE.intent = 'ROAM'; MKE.latch = null; MKE.ride = null;
+    MKE.face = Math.atan2(-_mkF.x, -_mkF.z);
+    MKE.halfH = MK.size*0.5; MKE.chaos = MK.chaosFloor; MKE.wild = 0;
+    if(MK.rigGait > 0) MKE.time += dt;
+    const feet = MKE.pos.y - MKE.halfH;
+    monkeyPose(MK.rigGait > 0 ? dt : 0, false, feet);
+    const hl = MKE.handLocal || _mkV.set(-0.24, 1.1, 0.2), cf = Math.cos(MKE.face), sf = Math.sin(MKE.face);
+    MKE.hand.set(MKE.pos.x + (hl.x*cf + hl.z*sf)*MK.size, feet + hl.y*MK.size, MKE.pos.z + (-hl.x*sf + hl.z*cf)*MK.size);
+}
+
+function updateMonkey(dt){
+    if(!MKE.built) return;
+    MKE.root.visible = MKE.on;
+    const blindEl = document.getElementById('mk-blind');
+    if(!MKE.on){ if(grapple.trackTarget === MKE) releaseGrapple(); if(MKE.mount) monkeyDismount('quiet'); if(blindEl) blindEl.style.opacity = 0; return; }
+    if(MKE.inspect){ if(blindEl) blindEl.style.opacity = 0; monkeyInspect(dt); return; }
+    const size = MK.size, spiral = MKE.state === 'SPIRAL';
+    MKE.halfH = size*0.5; MKE.hitR = size*0.75;
+    MKE.time += dt;
+    mkDrift();
+    MKE.logicBias = Math.max(0, MKE.logicBias - MK.featherDecay*dt);
+    MKE.calm = Math.max(0, MKE.calm - 0.1*dt);
+    monkeyMood(dt);
+    if(MKE.tumble > 0){ MKE.tumble -= dt; MKE.tumAng.addScaledVector(MKE.tum, dt); if(MKE.tumble <= 0){ MKE.tumble = 0; MKE.tumAng.set(0, 0, 0); } }
+    MKE.ropeCDt -= dt; MKE.rideCDt -= dt; MKE.shyT = Math.max(0, MKE.shyT - dt); MKE.emuCD -= dt;
+    if(MKE.emuT > 0 && MKE.state !== 'MOUNT'){ MKE.emuT -= dt; if(MKE.emuT <= 0){ MKE.emuTgt = null; MKE.emuCD = 8 + 12*(1 - MK.curious); } }
+    MKE.cycleAcc += dt;
+    while(MKE.cycleAcc >= MK.cycle){ MKE.cycleAcc -= MK.cycle; monkeyCycle(); }
+    if(MKE.state === 'SPIRAL'){
+        MKE.stT += dt; MKE.chaos = MK.chaosMid + MK.chaosAmp; MKE.wild = 1;
+        if(MKE.stT >= MK.spiralTime) monkeyRecover(false);
+    }
+    MKE.thinkAcc += dt;
+    if(MKE.thinkAcc >= MK.think){ MKE.thinkAcc = 0; monkeyThink(); }
+
+    const wasG = MKE.grounded, pvy = MKE.vel.y;
+    if(MKE.state === 'SPIRAL'){
+        MKE.hopCD -= dt;
+        if(MKE.grounded && MKE.hopCD <= 0){ MKE.vel.y = Math.sqrt(2*Math.abs(M.gravity)*MK.gravScale*MK.hopHeight*1.5); MKE.vel.x += (mkHash(Math.floor(MKE.time*4), 51)*2 - 1)*60; MKE.vel.z += (mkHash(Math.floor(MKE.time*4), 52)*2 - 1)*60; MKE.hopCD = 0.8; }
+        monkeyPhysics(dt);
+        MKE.face = mkWrap(MKE.face + MKE.omega*dt);
+    } else if(MKE.state === 'LATCH') monkeyLatchStep(dt);
+    else if(MKE.state === 'RIDE') monkeyRideStep(dt);
+    else if(MKE.state === 'MOUNT') monkeyMountStep(dt);
+    else {
+        monkeyTravel(dt, monkeyGoal());
+        const sx = MKE.vel.x, sz = MKE.vel.z;
+        const faceT = (MKE.intent === 'FRIEND' || MKE.intent === 'BUDDY') && MKE.tumble <= 0 && Math.hypot(player.pos.x - MKE.pos.x, player.pos.z - MKE.pos.z) < MK.hiReach*5*WORLD.scale ? Math.atan2(player.pos.x - MKE.pos.x, player.pos.z - MKE.pos.z)
+            : (sx*sx + sz*sz > 100 ? Math.atan2(sx, sz) : MKE.face);
+        MKE.face = mkWrap(MKE.face + mkWrap(faceT - MKE.face)*Math.min(1, dt*6));
+    }
+    monkeyMaybeThrow(dt);
+    monkeyTangle(dt);
+    monkeySmoke(dt, wasG, pvy);
+    updateBananas(dt);
+    if(MKE.state !== 'RIDE' && blindEl){ MKE.blind = 0; }
+    if(blindEl) blindEl.style.opacity = MKE.blind.toFixed(3);
+
+    // hand + high five (not while it's on your back or biting a titan)
+    const hl = MKE.handLocal || _mkV.set(-0.24, 1.1, 0.2), cf = Math.cos(MKE.face), sf = Math.sin(MKE.face), feet = MKE.pos.y - MKE.halfH;
+    MKE.hand.set(MKE.pos.x + (hl.x*cf + hl.z*sf)*size, feet + hl.y*size, MKE.pos.z + (-hl.x*sf + hl.z*cf)*size);
+    if(MKE.hiCD > 0) MKE.hiCD -= dt;
+    if(MKE.hiCD <= 0 && player.tumble <= 0 && MKE.state !== 'RIDE' && MKE.state !== 'LATCH'){
+        if(MKE.hand.distanceTo(player.pos) < MK.hiReach && player.vel.length() >= MK.hiMinSpeed) monkeyHighFive();
+    }
+
+    monkeyPose(dt, spiral, feet);
+
+    if(++MKE._tick >= 6){
+        MKE._tick = 0;
+        const el = document.getElementById('h-mnk');
+        const tag = spiral ? 'SPIRAL' : MKE.state === 'MOUNT' && MKE.mount && MKE.mount.ride ? 'EMU-' + MKE.mount.ride.mode : MKE.state === 'RIDE' ? 'RIDING' : MKE.state === 'LATCH' ? 'BITING' : MKE.tumble > 0 ? 'TUMBLE' : MKE.flare > 0 ? 'FLARE' : MKE.intent.toLowerCase();
+        if(el) el.textContent = tag + ' c' + MKE.chaos.toFixed(2) + ' l' + MKE.logic.toFixed(2) + ' r' + MKE.rec.toFixed(2) + ' x' + MKE.hiStreak + ' a' + MKE.agit.toFixed(2) + ' b' + MKE.bond.toFixed(2);
+    }
+}
+
+// ── scene strip + model loading ──
+function syncMonkeyButtons(){
+    const b = document.getElementById('btn-monkey'); if(b) b.textContent = 'monkey: ' + (MKE.on ? 'on' : 'off');
+}
+(function wireMonkeyUI(){
+    document.getElementById('btn-monkey').addEventListener('click', () => {
+        MKE.on = !MKE.on; syncMonkeyButtons(); saveSettingsSoon();
+        if(MKE.built) MKE.root.visible = MKE.on;
+        if(!MKE.on){ if(grapple.trackTarget === MKE) releaseGrapple(); if(MKE.ride) monkeyEndRide(true); if(MKE.mount) monkeyDismount('quiet'); monkeyDropRope(true); if(MKE.bgroup) MKE.bgroup.visible = false; }
+        else if(MKE.bgroup) MKE.bgroup.visible = true;
+    });
+    document.getElementById('btn-monkey-new').addEventListener('click', () => { if(grapple.trackTarget === MKE) releaseGrapple(); reseatMonkey(); showToast('new monkey'); });
+    const fi = document.getElementById('mk-file');
+    document.getElementById('btn-monkey-model').addEventListener('click', () => fi.click());
+    fi.addEventListener('change', () => {
+        const f = fi.files && fi.files[0]; if(!f) return;
+        const rd = new FileReader();
+        rd.onload = () => {
+            MKE.modelText = String(rd.result); MKE.autoOnce = true;
+            applyMonkeyModel();
+            if(MKE.custom){ try{ localStorage.setItem(MK_KEY, MKE.modelText); }catch(err){} showToast('monkey model loaded'); }
+            else MKE.modelText = null;
+        };
+        rd.readAsText(f); fi.value = '';
+    });
+    document.getElementById('btn-monkey-inspect').addEventListener('click', () => {
+        MKE.inspect = !MKE.inspect;
+        if(MKE.inspect){ if(grapple.trackTarget === MKE) releaseGrapple(); if(MKE.ride) monkeyEndRide(true); if(MKE.mount) monkeyDismount('quiet'); monkeyDropRope(true); MKE.latch = null; MKE.state = 'GO'; }
+        document.getElementById('btn-monkey-inspect').textContent = MKE.inspect ? 'inspect: on' : 'inspect monkey';
+    });
+    document.getElementById('btn-monkey-default').addEventListener('click', () => {
+        MKE.modelText = null; try{ localStorage.removeItem(MK_KEY); }catch(err){}
+        applyMonkeyModel(); showToast('default monkey');
+    });
+    syncMonkeyButtons();
+})();
+
+// ╔══════════════════════════════════════════════════════════╗
+// ║ [EMU] flocks — koi-pond rules on legs                     ║
+// ║ breeds + traits · startle (you, blasts, a flaring monkey, ║
+// ║ panic that spreads) · flock by breed · bombnana bait ·    ║
+// ║ grudges + kicks · who-it's-been-near memory → eggs/chicks ║
+// ║ blades and flybys only BONK them — emus never die         ║
+// ╚══════════════════════════════════════════════════════════╝
+const _eA = new THREE.Vector3(), _eB = new THREE.Vector3(), _eP = new THREE.Vector3();
+function emRnd(){ EMS.seed = (EMS.seed*16807) % 2147483647; return EMS.seed/2147483647; }
+function emToast(m){ if(EMS.toastT <= 0){ showToast(m); EMS.toastT = 3; } }
+function emH(e){ return EM.size*(e.age >= 1 ? 1 : 0.35 + 0.65*e.age); }                  // standing height (chicks grow into it)
+function emHead(e, v){ const h = emH(e), dn = e.peck > 0.5 ? 0.45 : 0; return v.set(e.pos.x + Math.sin(e.yaw)*h*(0.42 + dn*0.2), e.pos.y + h*(1.1 - dn), e.pos.z + Math.cos(e.yaw)*h*(0.42 + dn*0.2)); }
+function emFeathers(p, n, s){ for(let i = 0; i < n; i++) emit(p, _eB.set((Math.random()-0.5)*s, 10 + Math.random()*s*0.6, (Math.random()-0.5)*s), 0.7, false, 0.35); }
+
+function emMats(){
+    if(EMS.geo) return;
+    const B = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+    EMS.geo = { body:new THREE.IcosahedronGeometry(0.5, 0), neck:B(0.09, 0.42, 0.09), head:B(0.12, 0.11, 0.17), beak:B(0.06, 0.04, 0.1),
+        thigh:B(0.1, 0.27, 0.11), shin:B(0.05, 0.27, 0.05), foot:B(0.1, 0.03, 0.14), eye:B(0.03, 0.03, 0.03), egg:new THREE.IcosahedronGeometry(0.5, 1) };
+    const ph = c => new THREE.MeshPhongMaterial({ color:c, specular:0x000000, shininess:0, flatShading:true });
+    EMS.mNeck = ph(0x5E6B78); EMS.mLeg = ph(0x4A4740); EMS.mDark = ph(0x2B2722); EMS.mEgg = ph(0x2F4743);     // emu eggs really are that dark green
+    EMS.group = new THREE.Group(); scene.add(EMS.group);
+}
+function emBuildMesh(e){
+    const G = EMS.geo, root = new THREE.Group(), tilt = new THREE.Group(), body = new THREE.Group();
+    root.add(tilt); tilt.add(body);
+    e.mat = new THREE.MeshPhongMaterial({ color:new THREE.Color(e.col[0], e.col[1], e.col[2]), specular:0x000000, shininess:0, flatShading:true });
+    const add = (geo, m, x, y, z, par) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); par.add(o); return o; };
+    add(G.body, e.mat, 0, 0.64, -0.03, body).scale.set(0.8, 0.62, 1.08);               // the feather heap
+    const neck = new THREE.Group(); neck.position.set(0, 0.76, 0.24); body.add(neck);
+    add(G.neck, EMS.mNeck, 0, 0.2, 0, neck);
+    const head = new THREE.Group(); head.position.set(0, 0.42, 0.02); neck.add(head);
+    add(G.head, EMS.mNeck, 0, 0, 0.03, head); add(G.beak, EMS.mDark, 0, -0.01, 0.15, head);
+    add(G.eye, EMS.mDark, 0.065, 0.03, 0.06, head); add(G.eye, EMS.mDark, -0.065, 0.03, 0.06, head);
+    const legs = [];
+    for(const sx of [0.11, -0.11]){
+        const hip = new THREE.Group(); hip.position.set(sx, 0.52, 0); body.add(hip);
+        add(G.thigh, e.mat, 0, -0.13, 0, hip);
+        const knee = new THREE.Group(); knee.position.set(0, -0.26, 0); hip.add(knee);
+        add(G.shin, EMS.mLeg, 0, -0.13, 0, knee); add(G.foot, EMS.mLeg, 0, -0.26, 0.04, knee);
+        legs.push({ hip, knee });
+    }
+    e.mesh = { root, tilt, body, neck, head, legs };
+    EMS.group.add(root);
+}
+function emMake(type, col, tr, x, z, age){
+    const e = { type, col, tr, age, pos:new THREE.Vector3(x, floorY(x, z), z), vel:new THREE.Vector3(), yaw:emRnd()*6.283, off:emRnd()*1000,
+        home:{ x, z }, grounded:true, tumble:0, spin:new THREE.Vector3(), ang:new THREE.Vector3(), panic:0, fx:0, fz:1,
+        annoy:0, kickCD:0, kickT:0, bonkCD:0, carry:null, gait:emRnd()*6, peck:0, near:new Map(), layT:EM.layEvery*(0.4 + 0.6*emRnd()),
+        ride:null, mother:null, hopCD:0 };
+    emBuildMesh(e); EMS.list.push(e); return e;
+}
+function emEggMesh(){ const m = new THREE.Mesh(EMS.geo.egg, EMS.mEgg); EMS.group.add(m); return m; }
+
+function disposeEmus(){
+    if(typeof MKE !== 'undefined' && MKE.mount) monkeyDismount('quiet');
+    for(const e of EMS.list){ EMS.group.remove(e.mesh.root); e.mat.dispose(); }
+    for(const g of EMS.eggs) EMS.group.remove(g.mesh);
+    for(const b of MKE.bananas) b.carrier = null;
+    EMS.list.length = 0; EMS.eggs.length = 0; EMS.dist.length = 0;
+    MKE.emuNear.clear(); MKE.emuTgt = null; MKE.emuT = 0;
+}
+// flocks of one breed each, seeded, a short flight from your spawn and out of the boss clearing
+function spawnEmus(){
+    emMats(); disposeEmus();
+    EMS.group.visible = !!EM.on;
+    EMS.seed = 90210;
+    const s = getPlayerStart(), S = WORLD.scale, n = EM.count|0, clear = (typeof WG !== 'undefined' ? WG.bossClear*0.8 : 1500)*S;
+    const flocks = Math.max(1, Math.min(EM_TYPES.length, Math.ceil(n/3))), homes = [];
+    for(let f = 0; f < flocks; f++){
+        let hx = s[0], hz = s[2];
+        for(let k = 0; k < 60; k++){
+            const a = emRnd()*6.283, r = (550 + emRnd()*1700)*S;
+            hx = s[0] + Math.sin(a)*r; hz = s[2] + Math.cos(a)*r;
+            if(Math.hypot(hx, hz) > WORLD.half*0.88 || Math.hypot(hx, hz) < clear) continue;
+            if(homes.some(h => Math.hypot(h.x - hx, h.z - hz) < 550*S)) continue;
+            break;
+        }
+        homes.push({ x:hx, z:hz });
+    }
+    for(let i = 0; i < n; i++){
+        const f = i % flocks, h = homes[f], type = EM_TYPES[f % EM_TYPES.length], B = EM_BREEDS[type], tr = {};
+        for(const k in EM_LIM) tr[k] = THREE.MathUtils.clamp(B.tr[k]*(1 + (emRnd() - 0.5)*0.24), EM_LIM[k][0], EM_LIM[k][1]);
+        const col = B.col.map(c => THREE.MathUtils.clamp(c*(1 + (emRnd() - 0.5)*0.12), 0, 1));
+        const a = emRnd()*6.283, r = (40 + emRnd()*170)*S;
+        emMake(type, col, tr, h.x + Math.sin(a)*r, h.z + Math.cos(a)*r, 1).home = { x:h.x, z:h.z };
+    }
+}
+
+// ── koi genetics, ported: 12 "genes" with 1–3 crossover points decide each parent's share,
+//    traits blend in that proportion with a little drift; coat blends too (mixed breeds look mixed) ──
+function emBreed(a, b){
+    const n = 12, cuts = new Set(), nc = 1 + Math.floor(emRnd()*3);
+    while(cuts.size < nc) cuts.add(1 + Math.floor(emRnd()*(n - 1)));
+    let src = emRnd() < 0.5 ? a : b, fromA = 0;
+    for(let i = 0; i < n; i++){ if(cuts.has(i)) src = src === a ? b : a; if(src === a) fromA++; }
+    const share = a === b ? 1 : fromA/n, tr = {};
+    for(const k in EM_LIM){
+        const w = Math.max(0.15, Math.min(0.85, share + (emRnd() - 0.5)*0.3));
+        const v = (a.tr[k]*w + b.tr[k]*(1 - w))*(1 + (emRnd() - 0.5)*0.12);
+        tr[k] = THREE.MathUtils.clamp(v, EM_LIM[k][0], EM_LIM[k][1]);
+    }
+    let col = a.col.map((c, i) => c*share + b.col[i]*(1 - share));
+    if(emRnd() < 0.06) col = EM_BREEDS[EM_TYPES[Math.floor(emRnd()*EM_TYPES.length)]].col.slice();    // the odd throwback
+    return { type:share >= 0.5 ? a.type : b.type, col, tr };
+}
+// the emu this one has spent the most time around (itself if nobody)
+function emMate(e){
+    let best = e, bv = 1;   // koi needs ~1 s of company (its memory settles around dt/(1 - keep))
+    for(const [o, v] of e.near) if(v > bv && o.age >= 1 && EMS.list.includes(o)){ best = o; bv = v; }
+    return best;
+}
+
+// ── things that scare them; blasts and bonks leave a short-lived disturbance ──
+function emDisturb(x, z, f, r){ EMS.dist.push({ x, z, f, r, life:0.3 }); }
+function emStartle(e){
+    const S = WORLD.scale, R = EM.startleR*S, B = e.tr;
+    let best = 0, bx = 0, bz = 0;
+    const test = (x, z, f, rr) => {
+        const dx = e.pos.x - x, dz = e.pos.z - z, d = Math.hypot(dx, dz);
+        if(d >= rr) return;
+        const p = f*(1 - d/rr)*B.shy;
+        if(p > best){ best = p; if(d > 1e-3){ bx = dx/d; bz = dz/d; } else { const a = emRnd()*6.283; bx = Math.sin(a); bz = Math.cos(a); } }
+    };
+    // you: fast and low is terrifying, drifting by slowly is interesting (to the curious ones)
+    const ps = player.vel.length(), alt = player.pos.y - floorY(player.pos.x, player.pos.z), low = 400*S;
+    if(alt < low) test(player.pos.x, player.pos.z, (ps/M.maxSpeed)*1.8*(1 - alt/low)*(1 - 0.6*B.curious), R);
+    if(MKE.on && MKE.built && MKE.state !== 'MOUNT') test(MKE.pos.x, MKE.pos.z, MKE.flare > 0 ? 1.3 : 0.2*(1 - B.curious), R*0.6);
+    for(const d of EMS.dist) test(d.x, d.z, d.f, d.r);
+    for(const t of titans){ if(t.state === 'DEAD') continue; if(Math.hypot(t.vel.x, t.vel.z) > 25) test(t.base.x, t.base.z, 1.4, R + t.r*2); }
+    // panic is catching: a bolting flockmate sends its own breed the same way
+    let cx = 0, cz = 0, cp = 0;
+    if(EM.spread > 0) for(const o of EMS.list){
+        if(o === e || o.panic <= 0 || o.type !== e.type) continue;
+        const d = Math.hypot(o.pos.x - e.pos.x, o.pos.z - e.pos.z); if(d > R) continue;
+        const p = EM.spread*(o.panic/EM.panicTime)*(1 - d/R)*B.shy*1.6;
+        if(p > cp){ cp = p; cx = o.fx; cz = o.fz; }
+    }
+    if(cp > best){ best = cp; bx = cx; bz = cz; }
+    if(e.ride){                                                            // ridden: a real scare turns a steady ride wild
+        if(e.ride.mode === 'STEADY' && best > EM.startleAt*1.5) emRideWild(e);
+        return;
+    }
+    if(best > EM.startleAt && e.panic < EM.panicTime*0.4){
+        e.panic = EM.panicTime*(0.7 + 0.6*B.shy); e.fx = bx; e.fz = bz;
+        if(e.carry && emRnd() < 0.5){ const b = e.carry; e.carry = null; b.carrier = null; b.vel.set(bx*60, 80, bz*60); }     // drops it, maybe
+    }
+}
+
+// ── bonks: blades, flying into them, blasts. Up they go, tumbling; they'll remember it ──
+function emKnock(e, ix, iy, iz, grudge){
+    e.vel.x += ix; e.vel.y += iy; e.vel.z += iz; e.grounded = false;
+    const k = Math.min(2, Math.hypot(ix, iy, iz)/200);
+    e.tumble = 0.6 + 0.9*k; e.spin.set((emRnd()*2 - 1)*9*k, 0, (emRnd()*2 - 1)*9*k);
+    e.annoy = Math.min(1, e.annoy + grudge*e.tr.bold);
+    e.panic = Math.max(e.panic, EM.panicTime*0.6*e.tr.shy); { const l = Math.hypot(ix, iz); if(l > 1e-3){ e.fx = ix/l; e.fz = iz/l; } }
+    if(e.carry){ const b = e.carry; e.carry = null; b.carrier = null; b.vel.set(ix*0.5, 120, iz*0.5); }
+    if(e.ride && MKE.mount === e) monkeyDismount('thrown');
+    EMS.bonks++;
+}
+function emuSlash(hist){
+    if(!EM.on || !EMS.list.length) return false;
+    const n = hist.length; if(n < 3) return false;
+    if(Math.hypot(hist[n-1].x - hist[0].x, hist[n-1].y - hist[0].y) < C.swipePx) return false;
+    camera.getWorldDirection(_eA);
+    let best = null, bd = Infinity;
+    for(const e of EMS.list){
+        const h = emH(e); _eP.set(e.pos.x, e.pos.y + h*0.6, e.pos.z);
+        _eB.subVectors(_eP, player.pos); const d = _eB.length();
+        if(d > C.bladeRadius + h*0.45 || d >= bd) continue;
+        if(_eA.dot(_eB.normalize()) < C.facingDot) continue;
+        best = e; bd = d;
+    }
+    if(!best) return false;
+    _eB.set(best.pos.x - player.pos.x, 0, best.pos.z - player.pos.z).normalize();
+    const k = 150*EM.bonk;
+    emKnock(best, _eB.x*k + player.vel.x*0.4, 75*EM.bonk, _eB.z*k + player.vel.z*0.4, 0.6);
+    emDisturb(best.pos.x, best.pos.z, 1.3, EM.startleR*WORLD.scale);
+    emFeathers(_eP.set(best.pos.x, best.pos.y + emH(best)*0.6, best.pos.z), 16, 90);
+    emToast('bonk');
+    return true;
+}
+function emuBlast(p){
+    if(!EM.on) return;
+    const R = MK.blastR*1.4;
+    for(const e of EMS.list){
+        const dx = e.pos.x - p.x, dz = e.pos.z - p.z, d = Math.hypot(dx, dz, (e.pos.y + emH(e)*0.5) - p.y);
+        if(d > R) continue;
+        const k = (1 - d/R)*MK.blastKnock*EM.bonk, l = Math.hypot(dx, dz) || 1;
+        emKnock(e, dx/l*k, k*0.25 + 30, dz/l*k, 0.35);
+    }
+    emDisturb(p.x, p.z, 1.6, MK.blastR*3);
+}
+
+// ── a ridden emu: steady (follows you, monkey up top), bolting (gone, monkey clinging), bucking (monkey is leaving) ──
+function emRideWild(e){
+    const R = e.ride; if(!R) return;
+    R.mode = e.tr.bold >= 0.55 ? 'BUCK' : 'BOLT'; R.t = 0;
+    R.dur = EM.wildRide*(R.mode === 'BUCK' ? 1.3 - 0.4*e.tr.kick : 0.7 + 0.6*e.tr.shy);
+    const a = Math.atan2(e.pos.x - player.pos.x, e.pos.z - player.pos.z) + (emRnd() - 0.5)*1.6;
+    e.fx = Math.sin(a); e.fz = Math.cos(a);
+    if(R.mode === 'BUCK') EMS.bucks++; else EMS.bolts++;
+    emToast(R.mode === 'BUCK' ? 'the emu is bucking' : 'the emu bolted');
+}
+
+function emUpdate(e, dt){
+    const S = WORLD.scale, B = e.tr, h = emH(e), T = EMS.time + e.off, v = e.vel, p = e.pos;
+    const adult = e.age >= 1;
+    if(!adult){ e.age = Math.min(1, e.age + dt/Math.max(1, EM.grow)); if(e.mother && !EMS.list.includes(e.mother)) e.mother = null; }
+    e.kickCD -= dt; e.bonkCD -= dt; e.kickT = Math.max(0, e.kickT - dt); e.hopCD -= dt;
+    e.annoy = Math.max(0, e.annoy - dt*0.02);
+    if(e.panic > 0) e.panic = Math.max(0, e.panic - dt);
+    emStartle(e);
+
+    // ── what it wants ──
+    let tx, tz, spd = 60*S*B.speed*EM.speed, stop = 0, turn = 2.5;
+    const home = e.mother ? e.mother.pos : e.home;
+    tx = home.x + (Math.cos(T*0.05)*260 + Math.sin(T*0.13)*110)*S*(e.mother ? 0.25 : 1);
+    tz = home.z + (Math.sin(T*0.07)*260 + Math.cos(T*0.19)*110)*S*(e.mother ? 0.25 : 1);
+    const graze = 0.5 + 0.5*Math.sin(T*0.31);                                   // stop-and-go grazing
+    spd *= 0.25 + 0.75*graze; e.peck = graze < 0.22 ? 1 : 0;
+    const pd = Math.hypot(player.pos.x - p.x, player.pos.z - p.z), palt = player.pos.y - floorY(player.pos.x, player.pos.z);
+
+    let chasing = false;
+    if(e.ride){
+        const R = e.ride; R.t += dt; e.peck = 0;
+        if(R.mode === 'STEADY'){ const g = mkBuddySpot(); tx = g.x; tz = g.z; spd = 230*S*B.speed*EM.speed; stop = 30*S; }     // with a jockey it really runs
+        else if(R.mode === 'BOLT'){ const z = Math.sin(T*3.1)*0.6; tx = p.x + (e.fx*Math.cos(z) + e.fz*Math.sin(z))*400; tz = p.z + (e.fz*Math.cos(z) - e.fx*Math.sin(z))*400; spd = 200*S*B.speed*EM.speed; turn = 6; }
+        else { tx = p.x; tz = p.z; spd = 0; e.yaw += Math.sin(T*5)*7*dt;
+            if(e.grounded && e.hopCD <= 0){ v.y = Math.sqrt(2*Math.abs(M.gravity)*h*0.45); e.grounded = false; e.hopCD = 0.45; } }
+        if(R.t >= R.dur && MKE.mount === e) monkeyDismount(R.mode === 'STEADY' ? 'hop' : R.mode === 'BUCK' ? 'buck' : 'thrown');
+    } else if(e.panic > 0){
+        const z = Math.sin(T*2.3)*0.5;
+        tx = p.x + (e.fx*Math.cos(z) + e.fz*Math.sin(z))*400; tz = p.z + (e.fz*Math.cos(z) - e.fx*Math.sin(z))*400;
+        spd = 190*S*B.speed*EM.speed*(0.55 + 0.45*e.panic/EM.panicTime); turn = 5; e.peck = 0;
+    } else if(e.carry){                                                         // got a bombnana: keep-away from everyone
+        let ax = 0, az = 0;
+        for(const o of EMS.list){ if(o === e) continue; const dx = p.x - o.pos.x, dz = p.z - o.pos.z, d = Math.hypot(dx, dz); if(d < 500*S && d > 1){ ax += dx/d*(1 - d/(500*S)); az += dz/d*(1 - d/(500*S)); } }
+        { const dx = p.x - MKE.pos.x, dz = p.z - MKE.pos.z, d = Math.hypot(dx, dz); if(d < 500*S && d > 1){ ax += dx/d; az += dz/d; } }
+        const al = Math.hypot(ax, az);
+        if(al > 0.01){ tx = p.x + ax/al*300; tz = p.z + az/al*300; }
+        spd = 140*S*B.speed*EM.speed; turn = 4; e.peck = 0; chasing = true;
+    } else {
+        // bait: a bombnana on (or near) the ground draws the bold ones
+        if(B.bold > 0.3 && EM.baitR > 0){
+            let bb = null, bd = EM.baitR*S*B.bold;
+            for(const b of MKE.bananas){
+                if(!b.live || b.carrier) continue;
+                if(b.pos.y - floorY(b.pos.x, b.pos.z) > h*3) continue;
+                const d = Math.hypot(b.pos.x - p.x, b.pos.z - p.z); if(d < bd){ bd = d; bb = b; }
+            }
+            if(bb){
+                chasing = true; tx = bb.pos.x; tz = bb.pos.z; spd = 150*S*B.speed*EM.speed; turn = 4; e.peck = 0;
+                if(bd < h*0.5 && bb.pos.y < p.y + h*1.3 && adult){ bb.carrier = e; e.carry = bb; EMS.stolen++; emToast('an emu grabbed a bombnana'); }
+            }
+        }
+        // a grudge: the bold ones come for you and kick
+        if(!chasing && adult && EM.kickYou && e.annoy > 0.5 && B.bold > 0.45 && pd < 800*S && palt < h*3 && player.tumble <= 0){
+            tx = player.pos.x; tz = player.pos.z; spd = 170*S*B.speed*EM.speed; turn = 5; chasing = true; e.peck = 0;
+            if(pd < h*0.6 + M.radius && Math.abs(player.pos.y - (p.y + h*0.4)) < h && e.kickCD <= 0){
+                _eA.set(player.pos.x - p.x, 0, player.pos.z - p.z).normalize();
+                const k = EM.kick*B.kick;
+                player.vel.addScaledVector(_eA, k); player.vel.y += k*0.25;
+                if(k > M.tumbleThresh*0.8) startTumble(k, _eA.clone());
+                e.annoy = Math.max(0, e.annoy - 0.6); e.kickCD = 2.5; e.kickT = 0.35; EMS.kicks++;
+                emToast('emu kick');
+            }
+        }
+        // curious: drift over to look at you (when you're slow and low) or at the monkey
+        if(!chasing && B.curious > 0.45 && e.annoy < 0.3){
+            const cr = 650*S*B.curious;
+            if(pd < cr && player.vel.length() < 140 && palt < 200*S){ tx = player.pos.x; tz = player.pos.z; stop = 90*S; spd = 70*S*B.speed*EM.speed; e.peck = 0; }
+            else if(MKE.on && MKE.state === 'GO' && MKE.flare <= 0){
+                const md = Math.hypot(MKE.pos.x - p.x, MKE.pos.z - p.z);
+                if(md < cr){ tx = MKE.pos.x; tz = MKE.pos.z; stop = 60*S; spd = 60*S*B.speed*EM.speed; e.peck = 0; }
+            }
+        }
+        // flock: drift toward their own breed (chicks stick to mum)
+        if(!chasing && B.social > 0){
+            const R2 = (320*S)**2; let sx = 0, sz = 0, nn = 0;
+            for(const o of EMS.list){ if(o === e || o.type !== e.type) continue; const dx = o.pos.x - p.x, dz = o.pos.z - p.z; if(dx*dx + dz*dz < R2){ sx += o.pos.x; sz += o.pos.z; nn++; } }
+            if(nn){ const w = Math.min(0.85, B.social*0.5); tx += (sx/nn - tx)*w; tz += (sz/nn - tz)*w; }
+        }
+        // kicks at a monkey that gets in its face (always, if he's mid-flare)
+        if(adult && MKE.on && MKE.state === 'GO' && MKE.tumble <= 0 && e.kickCD <= 0 && B.bold > 0.4 && (e.annoy > 0.4 || MKE.flare > 0)){
+            const dx = MKE.pos.x - p.x, dz = MKE.pos.z - p.z, md = Math.hypot(dx, dz);
+            if(md < h*0.55 + MK.size*0.3 && Math.abs(MKE.pos.y - (p.y + h*0.5)) < h){
+                const k = EM.kick*B.kick, l = md || 1;
+                MKE.vel.set(dx/l*k, k*0.35, dz/l*k); MKE.grounded = false;
+                mkTumble(Math.max(M.tumbleThresh, k)); MKE.shyT = 2 + 6*MK.timid; mkStress(MK.stressGain*0.5);
+                e.kickCD = 3; e.kickT = 0.35; e.annoy = Math.max(0, e.annoy - 0.4); EMS.kicks++;
+                emToast('emu kicked the monkey');
+            }
+        }
+    }
+
+    // ── steer + run (same gravity as everyone) ──
+    let dx = tx - p.x, dz = tz - p.z; const dl = Math.hypot(dx, dz);
+    if(stop > 0) spd *= THREE.MathUtils.clamp((dl - stop)/stop, 0, 1);
+    if(dl > 1 && e.tumble <= 0){ const want = Math.atan2(dx, dz); e.yaw = mkWrap(e.yaw + THREE.MathUtils.clamp(mkWrap(want - e.yaw), -turn*dt, turn*dt)); }
+    if(e.grounded && e.tumble <= 0){
+        const k = Math.min(1, dt*(e.panic > 0 ? 6 : 3.5));
+        v.x += (Math.sin(e.yaw)*spd - v.x)*k; v.z += (Math.cos(e.yaw)*spd - v.z)*k;
+    }
+    v.y += M.gravity*dt;
+    if(!e.grounded){ const dr = Math.exp(-M.airDrag*dt); v.x *= dr; v.z *= dr; }
+    const px = p.x, py = p.y, pz = p.z;
+    p.addScaledVector(v, dt);
+    // trees, pillars, walls: pushed out sideways
+    const r = h*0.22;
+    for(const s of staticsNear(p.x, p.z, r + 2)){
+        if(p.y + h < s.baseY || p.y > s.topY) continue;
+        const sx = p.x - s.x, sz = p.z - s.z, hw = s.hw + r, hd = s.hd + r;
+        if(Math.abs(sx) > hw || Math.abs(sz) > hd) continue;
+        if(hw - Math.abs(sx) < hd - Math.abs(sz)){ p.x = s.x + Math.sign(sx || 1)*hw; v.x = e.tumble > 0 ? -v.x*0.4 : 0; }
+        else { p.z = s.z + Math.sign(sz || 1)*hd; v.z = e.tumble > 0 ? -v.z*0.4 : 0; }
+    }
+    // the structure is solid for them too
+    if(typeof nearStructure === 'function' && nearStructure(_eP.set(p.x, p.y + h*0.5, p.z), h*2)){
+        const blk = () => solidVox(p.x, p.y + h*0.5, p.z) || solidVox(p.x, p.y + h*0.1, p.z) || solidVox(p.x, p.y + h*0.95, p.z);
+        if(blk()){
+            const nx = p.x, nz = p.z;
+            p.x = px; if(blk()){ p.x = nx; p.z = pz; if(blk()){ p.x = px; p.z = pz; if(blk()){ p.y = py + 200*dt; v.y = Math.max(v.y, 40); } } else v.z = 0; } else v.x = 0;
+        }
+    }
+    { const hd = Math.hypot(p.x, p.z), lim = WORLD.half*0.98; if(hd > lim){ p.x *= lim/hd; p.z *= lim/hd; v.x *= -0.3; v.z *= -0.3; e.fx = -e.fx; e.fz = -e.fz; } }
+    const gy = floorY(p.x, p.z);
+    if(p.y <= gy){
+        const vi = -v.y; p.y = gy; if(v.y < 0) v.y = 0;
+        if(!e.grounded && vi > 120 && MK.dustScale > 0) mkDust(_eP.set(p.x, gy + 2, p.z), Math.round(6 + vi*0.03), 40 + vi*0.15);
+        e.grounded = true;
+        if(e.tumble > 0){ v.x *= Math.exp(-8*dt); v.z *= Math.exp(-8*dt); }
+    } else e.grounded = p.y <= gy + 0.5;
+    if(e.tumble > 0){ e.tumble -= dt; e.ang.addScaledVector(e.spin, dt); if(e.tumble <= 0 && !e.grounded) e.tumble = 0.05; }
+    else { e.ang.multiplyScalar(Math.exp(-dt*8)); }
+
+    // ── bump into you: you go through, they go flying ──
+    if(e.bonkCD <= 0 && EM.bonk > 0){
+        const ddx = p.x - player.pos.x, ddz = p.z - player.pos.z, dd = Math.hypot(ddx, ddz);
+        if(dd < r + M.radius + 4 && player.pos.y > p.y - M.radius && player.pos.y < p.y + h + M.radius){
+            const nx = ddx/(dd || 1), nz = ddz/(dd || 1), along = player.vel.x*nx + player.vel.z*nz;     // it's YOUR speed into it that counts
+            if(along > 50){
+                emKnock(e, nx*along*0.6*EM.bonk, along*0.15*EM.bonk + 30, nz*along*0.6*EM.bonk, 0.3);
+                player.vel.x -= nx*along*0.12; player.vel.z -= nz*along*0.12;
+                emDisturb(p.x, p.z, 1, EM.startleR*S*0.8); emFeathers(_eP.set(p.x, p.y + h*0.6, p.z), 10, 70);
+                e.bonkCD = 0.6;
+            }
+        }
+    }
+    // bombnana in its beak
+    if(e.carry){ if(!e.carry.live || e.carry.carrier !== e){ e.carry = null; } }
+
+    // ── who it's been around (koi memory): nearby and both calm; slowly forgotten ──
+    const keep = Math.pow(EM.mateMemory, dt*60), mr = 180*S;
+    for(const [o, val] of e.near){ if(!EMS.list.includes(o) || val < 0.002) e.near.delete(o); else e.near.set(o, val*keep); }
+    if(adult && e.panic <= 0) for(const o of EMS.list){
+        if(o === e || o.age < 1 || o.panic > 0) continue;
+        if(Math.abs(o.pos.x - p.x) < mr && Math.abs(o.pos.z - p.z) < mr) e.near.set(o, (e.near.get(o) || 0) + dt);
+    }
+    if(MKE.on && Math.hypot(MKE.pos.x - p.x, MKE.pos.z - p.z) < 260*S) MKE.emuNear.set(e, (MKE.emuNear.get(e) || 0) + dt);   // settles near ~8 s when he hangs around one
+    // eggs: calm adults that have had company lay one now and then (up to the max)
+    if(adult && EM.breed && !e.ride && e.panic <= 0 && e.tumble <= 0){
+        e.layT -= dt;
+        if(e.layT <= 0){
+            e.layT = EM.layEvery*(0.7 + 0.6*emRnd());
+            const mate = emMate(e);
+            if(mate !== e && EMS.list.length + EMS.eggs.length < EM.max){
+                EMS.eggs.push({ pos:new THREE.Vector3(p.x - Math.sin(e.yaw)*h*0.3, gy, p.z - Math.cos(e.yaw)*h*0.3), t:EM.hatch, genes:emBreed(e, mate), mother:e, mesh:emEggMesh(), wob:emRnd()*6 });
+                EMS.laid++; emToast('an emu laid an egg');
+            }
+        }
+    }
+}
+
+function emPose(e, dt){
+    const m = e.mesh, h = emH(e), sp = Math.hypot(e.vel.x, e.vel.z), run = Math.min(1, sp/(h*3));
+    e.gait += dt*(1.5 + Math.min(14, sp/(h*0.11)));
+    const g = e.gait, bob = e.grounded ? Math.abs(Math.sin(g))*h*0.035*run : 0;
+    m.root.position.set(e.pos.x, e.pos.y + bob, e.pos.z); m.root.scale.setScalar(h); m.root.rotation.y = e.yaw;
+    m.tilt.rotation.set(e.ang.x, 0, e.ang.z);
+    const L = m.legs, buck = e.ride && e.ride.mode === 'BUCK';
+    if(!e.grounded || e.tumble > 0){
+        const f = Math.sin(EMS.time*14 + e.off)*0.8;
+        L[0].hip.rotation.x = f; L[1].hip.rotation.x = -f; L[0].knee.rotation.x = 0.9; L[1].knee.rotation.x = 0.9;
+    } else {
+        const a = Math.sin(g)*0.95*run;
+        L[0].hip.rotation.x = a; L[1].hip.rotation.x = -a;
+        L[0].knee.rotation.x = Math.max(0, Math.sin(g - 1.2))*1.1*run; L[1].knee.rotation.x = Math.max(0, -Math.sin(g - 1.2))*1.1*run;
+    }
+    if(e.kickT > 0){ const k = Math.sin(Math.PI*(1 - e.kickT/0.35)); L[0].hip.rotation.x = -1.5*k; L[0].knee.rotation.x = 0.2; }
+    m.body.rotation.x = buck ? Math.sin(EMS.time*11)*0.45 : 0;
+    const nx = e.peck ? 1.45 : 0.15 + 0.55*run;                                // neck forward when running, down when pecking
+    m.neck.rotation.x += (nx - m.neck.rotation.x)*Math.min(1, dt*6);
+    m.head.rotation.x = -m.neck.rotation.x*0.8 + (e.peck ? Math.max(0, Math.sin(EMS.time*9 + e.off))*0.5 : 0);
+    m.head.rotation.y = e.panic > 0 ? Math.sin(EMS.time*13 + e.off)*0.5 : Math.sin(EMS.time*0.7 + e.off)*0.3;
+}
+
+function updateEmus(dt){
+    if(!EMS.group) return;
+    EMS.group.visible = !!EM.on;
+    if(!EM.on){ if(MKE.mount) monkeyDismount('quiet'); return; }
+    EMS.time = (EMS.time || 0) + dt; EMS.toastT -= dt;
+    for(let i = EMS.dist.length - 1; i >= 0; i--) if((EMS.dist[i].life -= dt) <= 0) EMS.dist.splice(i, 1);
+    const keepM = Math.pow(0.998, dt*60);
+    for(const [o, val] of MKE.emuNear){ if(!EMS.list.includes(o) || val < 0.002) MKE.emuNear.delete(o); else MKE.emuNear.set(o, val*keepM); }
+    for(const e of EMS.list) emUpdate(e, dt);
+    // don't stack up on each other
+    const L = EMS.list;
+    for(let i = 0; i < L.length; i++) for(let j = i + 1; j < L.length; j++){
+        const a = L[i], b = L[j], rr = (emH(a) + emH(b))*0.2, dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, d2 = dx*dx + dz*dz;
+        if(d2 >= rr*rr || d2 < 1e-6) continue;
+        const d = Math.sqrt(d2), push = (rr - d)*0.5, nx = dx/d, nz = dz/d;
+        a.pos.x -= nx*push; a.pos.z -= nz*push; b.pos.x += nx*push; b.pos.z += nz*push;
+    }
+    // eggs → chicks (genes from the koi-style breed)
+    for(let i = EMS.eggs.length - 1; i >= 0; i--){
+        const g = EMS.eggs[i], s = EM.size*0.16;
+        g.t -= dt;
+        g.mesh.scale.set(s*0.8, s, s*0.8);
+        g.mesh.position.set(g.pos.x, floorY(g.pos.x, g.pos.z) + s*0.5, g.pos.z);
+        g.mesh.rotation.z = g.t < 3 ? Math.sin(EMS.time*20 + g.wob)*0.25 : 0;          // it rocks just before it hatches
+        if(g.t <= 0){
+            const c = emMake(g.genes.type, g.genes.col, g.genes.tr, g.pos.x, g.pos.z, 0);
+            c.mother = EMS.list.includes(g.mother) ? g.mother : null; c.home = g.mother ? g.mother.home : { x:g.pos.x, z:g.pos.z };
+            EMS.group.remove(g.mesh); EMS.eggs.splice(i, 1); EMS.hatched++;
+            emToast('a chick hatched');
+        }
+    }
+    for(const e of EMS.list) emPose(e, dt);
+}
+function syncEmuButton(){ const b = document.getElementById('btn-emus'); if(b) b.textContent = 'emus: ' + (EM.on ? 'on' : 'off'); }
+(function wireEmuUI(){
+    const b = document.getElementById('btn-emus'); if(!b) return;
+    b.addEventListener('click', () => { EM.on = EM.on ? 0 : 1; syncEmuButton(); saveSettingsSoon(); if(EM.on && !EMS.list.length) spawnEmus(); });
+    const n = document.getElementById('btn-emus-new'); if(n) n.addEventListener('click', () => { spawnEmus(); showToast('new emus'); });
+    syncEmuButton();
+})();
+
 (function(){
     const btn = document.getElementById('deck-reset'); let armed = 0;
     btn.addEventListener('click', e => {
@@ -3623,6 +5400,8 @@ function animate(){
     }
     physics(dt);
     updateTitans(dt);
+    updateEmus(dt);
+    updateMonkey(dt);
     pickLevel(); syncFaceUniforms();
     updateSmoke(dt);
     drawSlash();
