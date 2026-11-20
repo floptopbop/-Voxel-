@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>DEPTH_AI · photo → depth handoff</title>
+<style>
+:root{
+  --bg:#2b2926;--layer:#36332f;--layer2:#45413c;--line:#1a1816;
+  --txt:#f4e6cf;--dim:#a8998a;--acc:#e86cbe;--amber:#e9b85a;
+  --mono:"IBM Plex Mono","SF Mono","Fira Code",ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}
+html,body{background:var(--bg);color:var(--txt);font-family:var(--mono);overflow:hidden;width:100%;height:100%;}
+#hud{position:fixed;top:0;left:0;right:0;z-index:20;height:22px;padding:0 8px;display:flex;align-items:center;gap:10px;
+  background:rgba(43,41,38,.86);border-bottom:1px solid var(--line);font-size:9px;letter-spacing:1.3px;white-space:nowrap;overflow:hidden;color:var(--dim);}
+#hud b{font-weight:normal;color:var(--txt);}#hud .hl{color:var(--acc);}#hud .err{color:var(--amber);}
+#stage{position:fixed;top:22px;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;}
+#view{max-width:100%;max-height:100%;image-rendering:auto;}
+#deck{position:fixed;left:0;right:0;bottom:0;z-index:25;max-height:35vh;display:flex;flex-direction:column;transition:transform .22s;}
+#deck.shut{transform:translateY(calc(100% - 32px - env(safe-area-inset-bottom,0px)));}
+#deck-tab{height:32px;flex:0 0 32px;display:flex;align-items:center;gap:8px;padding:0 10px;background:var(--layer);
+  border-top:2px solid var(--line);border-bottom:1px solid var(--line);font-size:9.5px;letter-spacing:.2em;color:var(--dim);}
+#deck-tab i{font-style:normal;opacity:.55;margin-right:2px;}#deck-tab .sp{flex:1;}
+#deck-body{background:var(--layer);padding:8px 10px;padding-bottom:calc(12px + env(safe-area-inset-bottom,0px));overflow-y:auto;display:flex;flex-direction:column;gap:7px;}
+.tbtn{background:var(--layer2);border:1px solid var(--line);color:var(--dim);font-family:var(--mono);font-size:9px;letter-spacing:.12em;padding:6px 9px;border-radius:2px;}
+.tbtn.on{border-color:var(--acc);color:var(--txt);}.tbtn:active{border-color:var(--acc);color:var(--txt);}.tbtn:disabled{opacity:.4;}
+.tbtn.go{border-color:var(--acc);color:var(--txt);}
+.drow{display:flex;flex-wrap:wrap;gap:5px;align-items:center;}
+.srow{display:flex;align-items:center;gap:8px;}
+.sdim{color:var(--txt);font-size:9.5px;letter-spacing:.08em;white-space:nowrap;min-width:72px;}
+.sbadge{color:var(--acc);font-size:9.5px;min-width:52px;text-align:right;white-space:nowrap;}
+.sec{display:flex;align-items:baseline;gap:7px;font-size:9px;letter-spacing:2.4px;color:var(--txt);border-bottom:1px solid var(--line);padding:4px 0 3px;}
+.sec i{font-style:normal;opacity:.55;}.sec span{margin-left:auto;font-size:8.5px;letter-spacing:.06em;color:var(--dim);}
+.hint{font-size:9px;color:var(--dim);line-height:1.55;}.hint b{font-weight:normal;color:var(--txt);}
+input[type=range]{flex:1;-webkit-appearance:none;appearance:none;background:transparent;height:22px;}
+input[type=range]::-webkit-slider-runnable-track{height:2px;background:var(--line);}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--layer);border:2px solid var(--acc);margin-top:-7px;}
+.hidden-input{display:none;}
+#textOut{position:fixed;top:30px;left:8px;right:8px;bottom:8px;z-index:50;background:var(--layer);border:1px solid var(--line);display:none;flex-direction:column;gap:6px;padding:8px;}
+#textOut.on{display:flex;}
+#textBox{flex:1;width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);font-family:var(--mono);font-size:9px;padding:6px;-webkit-user-select:text;user-select:text;resize:none;}
+#textNote{font-size:9px;color:var(--dim);letter-spacing:.08em;}
+#empty{position:fixed;top:40%;left:0;right:0;text-align:center;font-size:9.5px;letter-spacing:.2em;color:var(--dim);pointer-events:none;}
+</style>
+<script>
+/* ODM shared · offline cache (GitHub Pages / https only, never in Koder) + one handoff store all tools on this site share */
+if('serviceWorker' in navigator && location.protocol==='https:') addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+window.ODM_HANDOFF=window.ODM_HANDOFF||(function(){
+  const DB='ODM_SHARED_HANDOFF_V1';
+  const open=()=>new Promise((res,rej)=>{try{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);}catch(e){rej(e);}});
+  const put=async(k,v)=>{const db=await open();return new Promise((res,rej)=>{const t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=()=>{db.close();res();};t.onerror=()=>{db.close();rej(t.error);};});};
+  const get=async k=>{const db=await open();return new Promise((res,rej)=>{const q=db.transaction('kv').objectStore('kv').get(k);q.onsuccess=()=>{db.close();res(q.result);};q.onerror=()=>{db.close();rej(q.error);};});};
+  return{put,get};
+})();
+/* the hub tab: same spot in every tool (left edge). A tool can take it over by defining window.odmHubTab (the game opens its in-world hub). */
+addEventListener('DOMContentLoaded',()=>{
+  if(document.getElementById('odm-hub-tab'))return;
+  const a=document.createElement('a');a.id='odm-hub-tab';a.href='./';a.title='hub';a.textContent='⌂';
+  a.addEventListener('click',e=>{if(typeof window.odmHubTab==='function'){e.preventDefault();e.stopPropagation();window.odmHubTab();}});
+  document.body.appendChild(a);
+});
+</script>
+<style>
+#odm-hub-tab{position:fixed;left:0;top:42%;z-index:300;width:20px;height:38px;display:flex;align-items:center;justify-content:center;
+  background:rgba(18,18,20,.74);border:1px solid rgba(255,255,255,.18);border-left:none;border-radius:0 6px 6px 0;
+  color:#C9A455;font:12px/1 ui-monospace,Menlo,monospace;text-decoration:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
+#odm-hub-tab:active{background:rgba(143,43,51,.8);color:#F3E7D3;}
+</style>
+</head>
+<body>
+<div id="hud"><span><b>DEPTH_AI</b> <span class="hl">v1</span></span><span id="hSize">—</span><span id="hStatus">LOAD A PHOTO</span></div>
+<div id="stage"><canvas id="view" width="2" height="2"></canvas></div>
+<div id="empty">深 · LOAD A PHOTO · NOTHING ELSE RUNS HERE</div>
+
+<div id="textOut">
+  <div id="textNote">EXPORT</div>
+  <textarea id="textBox" readonly></textarea>
+  <div class="drow"><button class="tbtn" id="textCopy">COPY ALL</button><button class="tbtn" id="textShare">SHARE / SAVE FILE</button><button class="tbtn" id="textClose">[ CLOSE ]</button></div>
+</div>
+
+<div id="deck">
+  <div id="deck-tab"><span><i>深</i>DEPTH AI</span><span class="sp"></span><button class="tbtn" id="bFold">FOLD ▾</button></div>
+  <div id="deck-body">
+    <div class="sec"><i>源</i>PHOTO<span id="srcInfo">none</span></div>
+    <div class="drow"><button class="tbtn" id="bLoad">LOAD PHOTO</button><button class="tbtn" id="bCam">CAMERA</button></div>
+
+    <div class="sec"><i>脳</i>MODEL<span id="aiStat">not run</span></div>
+    <div class="srow"><span class="sdim">AI SIZE</span><input type="range" id="sSize" min="196" max="518" step="14" value="364"><span class="sbadge" id="sSizeV">364px</span></div>
+    <div class="drow"><button class="tbtn go" id="bRun">RUN AI DEPTH</button>
+      <span class="sdim" style="min-width:0">VIEW</span><button class="tbtn" id="vPhoto">PHOTO</button><button class="tbtn on" id="vDepth">DEPTH</button><button class="tbtn" id="vMix">MIX</button></div>
+    <div class="hint">Needs a connection the first time: the model (about 25 MB) downloads once, then the browser keeps it. This page runs only the model: no 3D, no mesh. Then it hands the depth to TERRA_FORGE as JSON, so the 3D tool never loads the model. Lower <b>AI SIZE</b> if it still crashes: memory grows much faster than the size.</div>
+
+    <div class="sec"><i>渡</i>HANDOFF<span id="hoInfo">nothing yet</span></div>
+    <div class="drow"><button class="tbtn" id="bInv">INVERT</button></div>
+    <div class="drow"><button class="tbtn go" id="bSend">SEND</button><button class="tbtn" id="bCopyHO">COPY HANDOFF JSON</button></div>
+    <div class="drow"><a class="tbtn" href="terra.html" style="text-decoration:none">OPEN TERRA_FORGE ›</a><a class="tbtn" href="body.html" style="text-decoration:none">OPEN BODY FORGE ›</a></div>
+    <div class="hint"><b>SEND</b> parks the depth and the photo colours on this device. In TERRA_FORGE, press <b>AI HANDOFF</b> in SOURCE; in BODY FORGE, Look → <b>Pull AI handoff</b>. If the two pages don't share storage, use <b>COPY HANDOFF JSON</b> and paste it into TERRA_FORGE's box (or load it as a file).</div>
+
+    <div class="sec"><i>地</i>STRAIGHT TO THE GAME<span>optional</span></div>
+    <div class="srow"><span class="sdim">HEIGHT</span><input type="range" id="sZ" min="0.1" max="8" step="0.05" value="2"><span class="sbadge" id="sZV">2.00</span></div>
+    <div class="srow"><span class="sdim">GRID</span><input type="range" id="sGrid" min="32" max="240" step="8" value="160"><span class="sbadge" id="sGridV">160×160</span></div>
+    <div class="drow"><button class="tbtn" id="bGame">GAME TERRAIN JSON</button></div>
+    <div class="hint">The ODM composer format the game and DEPTH_FORGE use (exportMeta + vertexDataMatrix), stretched to a square.</div>
+  </div>
+</div>
+<input type="file" id="fPhoto" class="hidden-input" accept="image/*">
+<input type="file" id="fCam" class="hidden-input" accept="image/*" capture="environment">
+
+<script>
+(()=>{'use strict';
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const SKEY='DEPTH_AI_SETTINGS_V1',HKEY='TERRA_AI_HANDOFF_V1';
+const S={size:364,view:'depth',inv:false,z:2,grid:160};
+try{const o=JSON.parse(localStorage.getItem(SKEY)||'{}');for(const k in S)if(typeof o[k]===typeof S[k])S[k]=o[k];}catch(_){}
+const save=()=>{try{localStorage.setItem(SKEY,JSON.stringify(S));}catch(_){}};
+const setStatus=(m,err)=>{const e=$('hStatus');e.textContent=m;e.className=err?'err':'';};
+
+// ── state: one downscaled photo, one depth map. Nothing else is kept.
+let PHOTO=null;        // canvas ≤1024 long side
+let NAME='photo';
+let DEP=null;          // {w,h,d:Float32 0..1 (near = high), rgb:Uint8 w*h*3}
+let busy=false;
+
+// ── photo in: decode, shrink to ≤1024, drop the original right away
+async function loadPhoto(file){
+  if(!file)return;
+  const url=URL.createObjectURL(file);
+  try{
+    const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('could not decode this picture'));i.src=url;});
+    const L=1024,k=Math.min(1,L/Math.max(img.naturalWidth,img.naturalHeight));
+    const c=document.createElement('canvas');c.width=Math.max(2,Math.round(img.naturalWidth*k));c.height=Math.max(2,Math.round(img.naturalHeight*k));
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+    img.src='';
+    if(PHOTO){PHOTO.width=1;PHOTO.height=1;}
+    PHOTO=c;NAME=(file.name||'photo').replace(/\.[^.]+$/,'');DEP=null;
+    $('srcInfo').textContent=`${NAME.slice(0,18)} · ${c.width}×${c.height}`;$('hoInfo').textContent='nothing yet';$('aiStat').textContent='not run';
+    $('empty').style.display='none';
+    S.view='photo';syncView();draw();setStatus('PHOTO READY · RUN AI DEPTH');
+  }catch(e){setStatus(String(e.message||e).toUpperCase(),true);}
+  finally{URL.revokeObjectURL(url);}
+}
+$('bLoad').onclick=()=>$('fPhoto').click();$('bCam').onclick=()=>$('fCam').click();
+$('fPhoto').onchange=e=>{loadPhoto(e.target.files[0]);e.target.value='';};
+$('fCam').onchange=e=>{loadPhoto(e.target.files[0]);e.target.value='';};
+
+// ── the photo exactly as the model will see it: both sides multiples of 14, long side = AI SIZE, RGB bytes
+function modelInput(){
+  const a=PHOTO.width/PHOTO.height,L=S.size,m14=v=>Math.max(28,Math.round(v/14)*14);
+  const W=m14(a>=1?L:L*a),H=m14(a>=1?L/a:L);
+  const c=document.createElement('canvas');c.width=W;c.height=H;const cx=c.getContext('2d');
+  cx.drawImage(PHOTO,0,0,W,H);const id=cx.getImageData(0,0,W,H).data;c.width=1;c.height=1;
+  const px=new Uint8Array(W*H*3);for(let i=0,j=0;i<W*H;i++,j+=4){px[i*3]=id[j];px[i*3+1]=id[j+1];px[i*3+2]=id[j+2];}
+  return{px,W,H};
+}
+
+// ═══ MODEL — Depth Anything v2 small (q8, WebAssembly, one thread) in a throwaway worker.
+//     Same code runs in a hidden frame if workers are refused, and in the page as a last resort.
+const TF_URL='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1';
+const AI_MODELS=['onnx-community/depth-anything-v2-small','Xenova/depth-anything-small-hf'];
+const AI_SRC=[
+"let pipe=null,mod=null;",
+"const inW=typeof WorkerGlobalScope!=='undefined';",
+"const post=(m,tr)=>inW?self.postMessage(m,tr||[]):parent.postMessage(m,'*',tr||[]);",
+"const note=m=>post({t:'note',m});",
+"self.onmessage=async e=>{const q=e.data;if(!q||!q.url)return;let stage='import';",
+"  try{",
+"    if(!mod){note('loading runtime…');mod=await import(q.url);}",
+"    stage='load';const env=mod.env;env.allowLocalModels=false;",
+"    try{const w=env.backends.onnx.wasm;w.numThreads=1;w.proxy=false;}catch(_){}",
+"    if(!pipe){let last=null;",
+"      for(const id of q.models){try{",
+"        pipe=await mod.pipeline('depth-estimation',id,{device:'wasm',dtype:'q8',",
+"          progress_callback:p=>{if(p&&p.status==='progress'&&isFinite(p.progress))note('downloading '+Math.round(p.progress)+'%');}});",
+"        break;}catch(err){last=err;}}",
+"      if(!pipe)throw last||new Error('model did not load');}",
+"    stage='run';",
+"    const ip=pipe.processor&&pipe.processor.image_processor;",
+"    if(ip){ip.do_resize=false;ip.do_pad=false;ip.do_center_crop=false;}",
+"    note('estimating '+q.w+'×'+q.h+'…');",
+"    const out=await pipe(new mod.RawImage(new Uint8ClampedArray(q.buf),q.w,q.h,3));",
+"    const t=out.predicted_depth,dm=t.dims,h=dm[dm.length-2],w=dm[dm.length-1];",
+"    const d=new Float32Array(t.data);",
+"    post({t:'done',w,h,d},[d.buffer]);",
+"  }catch(err){post({t:'err',stage,m:String(err&&err.message||err)});}",
+"};",
+"post({t:'ready'});"].join('\n');
+const aiNote=m=>{$('aiStat').textContent=String(m).slice(0,30);setStatus('AI · '+m);};
+let aiWorker=null,aiFrame=null;
+function aiStop(){if(aiWorker){try{aiWorker.terminate();}catch(_){}aiWorker=null;}if(aiFrame){try{aiFrame.remove();}catch(_){}aiFrame=null;}}
+function handshake(post,attach,detach,px,W,H,res,rej){
+  let ready=false,done=false;
+  const finish=()=>{done=true;clearTimeout(t0);detach();};
+  const t0=setTimeout(()=>{if(!ready&&!done){finish();rej({iso:true,e:new Error('did not start')});}},8000);
+  attach(m=>{m=m||{};
+    if(m.t==='ready'){ready=true;clearTimeout(t0);post({url:TF_URL,models:AI_MODELS,w:W,h:H,buf:px.buffer},[px.buffer]);}
+    else if(m.t==='note')aiNote(m.m);
+    else if(m.t==='done'){finish();res(m);}
+    else if(m.t==='err'){finish();rej(m.stage==='import'?{iso:true,e:new Error(m.m)}:new Error(m.m));}
+  },e=>{if(done)return;finish();rej(ready?new Error((e&&e.message)||'AI stopped'):{iso:true,e:new Error('failed to start')});});
+}
+function viaWorker(px,W,H){return new Promise((res,rej)=>{
+  let w,url;
+  try{url=URL.createObjectURL(new Blob([AI_SRC],{type:'text/javascript'}));w=new Worker(url,{type:'module'});}
+  catch(e){if(url)URL.revokeObjectURL(url);rej({iso:true,e});return;}
+  aiWorker=w;
+  handshake((m,tr)=>w.postMessage(m,tr),(on,onErr)=>{w.onmessage=e=>on(e.data);w.onerror=e=>{if(e&&e.preventDefault)e.preventDefault();onErr(e);};},
+    ()=>{try{w.terminate();}catch(_){}if(aiWorker===w)aiWorker=null;try{URL.revokeObjectURL(url);}catch(_){}},px,W,H,res,rej);
+});}
+function viaFrame(px,W,H){return new Promise((res,rej)=>{
+  const f=document.createElement('iframe');f.style.cssText='position:fixed;width:1px;height:1px;left:-10px;top:-10px;border:0;opacity:0;pointer-events:none;';
+  let lis=null;aiFrame=f;
+  handshake((m,tr)=>f.contentWindow.postMessage(m,'*',tr),
+    on=>{lis=e=>{if(f.contentWindow&&e.source===f.contentWindow)on(e.data);};window.addEventListener('message',lis);},
+    ()=>{window.removeEventListener('message',lis);try{f.srcdoc='';}catch(_){}f.remove();if(aiFrame===f)aiFrame=null;},px,W,H,res,rej);
+  f.srcdoc='<!doctype html><scr'+'ipt type="module">'+AI_SRC+'</scr'+'ipt>';document.body.appendChild(f);
+});}
+async function inPage(px,W,H){
+  const mod=await import(TF_URL),env=mod.env;env.allowLocalModels=false;
+  try{const w=env.backends.onnx.wasm;w.numThreads=1;w.proxy=false;}catch(_){}
+  let pipe=null,last=null;
+  for(const id of AI_MODELS){try{pipe=await mod.pipeline('depth-estimation',id,{device:'wasm',dtype:'q8',
+    progress_callback:p=>{if(p&&p.status==='progress'&&isFinite(p.progress))aiNote('downloading '+Math.round(p.progress)+'%');}});break;}catch(e){last=e;}}
+  if(!pipe)throw last||new Error('model did not load');
+  try{const ip=pipe.processor&&pipe.processor.image_processor;if(ip){ip.do_resize=false;ip.do_pad=false;ip.do_center_crop=false;}
+    aiNote('estimating '+W+'×'+H+'…');
+    const out=await pipe(new mod.RawImage(new Uint8ClampedArray(px.buffer),W,H,3)),t=out.predicted_depth,dm=t.dims;
+    return{h:dm[dm.length-2],w:dm[dm.length-1],d:new Float32Array(t.data)};}
+  finally{try{if(pipe.model&&pipe.model.dispose)await pipe.model.dispose();}catch(_){}}
+}
+async function runAI(){
+  if(busy)return;if(!PHOTO){setStatus('LOAD A PHOTO FIRST',true);return;}
+  busy=true;$('bRun').disabled=true;let how='';
+  try{
+    let inp=modelInput();const rgb=inp.px.slice();           // keep the colours; the pixels themselves go to the model
+    let out;
+    try{out=await viaWorker(inp.px,inp.W,inp.H);how='worker';}
+    catch(e){if(!(e&&e.iso))throw e;inp=modelInput();
+      try{out=await viaFrame(inp.px,inp.W,inp.H);how='frame';}
+      catch(e2){if(!(e2&&e2.iso))throw e2;inp=modelInput();out=await inPage(inp.px,inp.W,inp.H);how='page';}}
+    const{w,h,d}=out;
+    if(!(w>=2&&h>=2&&d&&d.length===w*h))throw new Error('model returned an odd depth map');
+    if(w!==inp.W||h!==inp.H)throw new Error(`depth ${w}×${h} ≠ input ${inp.W}×${inp.H}`);
+    let mn=Infinity,mx=-Infinity;for(const v of d){if(v<mn)mn=v;if(v>mx)mx=v;}const r=mx-mn||1;
+    for(let i=0;i<d.length;i++)d[i]=(d[i]-mn)/r;
+    DEP={w,h,d,rgb};
+    $('aiStat').textContent=`${w}×${h} · ${how}`;$('hoInfo').textContent='ready to send';
+    S.view='depth';syncView();draw();
+    setStatus(`DEPTH READY · ${w}×${h} · MODEL CLOSED · SEND IT ON`);
+  }catch(err){setStatus('AI: '+String(err&&(err.message||(err.e&&err.e.message))||err).slice(0,70),true);$('aiStat').textContent='failed';}
+  finally{aiStop();busy=false;$('bRun').disabled=false;}
+}
+$('bRun').onclick=runAI;
+
+// ── view (plain 2D canvas, no WebGL anywhere on this page)
+function draw(){
+  const cv=$('view'),cx=cv.getContext('2d');
+  if(!PHOTO){cv.width=2;cv.height=2;return;}
+  const W=DEP?DEP.w:PHOTO.width,H=DEP?DEP.h:PHOTO.height;
+  cv.width=W;cv.height=H;
+  if(S.view==='photo'||!DEP){cx.drawImage(PHOTO,0,0,W,H);fit();return;}
+  const im=cx.createImageData(W,H),o=im.data;
+  for(let i=0;i<W*H;i++){let v=DEP.d[i];if(S.inv)v=1-v;const g=v*255;
+    if(S.view==='mix'){o[i*4]=DEP.rgb[i*3]*(.35+.65*v);o[i*4+1]=DEP.rgb[i*3+1]*(.35+.65*v);o[i*4+2]=DEP.rgb[i*3+2]*(.35+.65*v);}
+    else{o[i*4]=g;o[i*4+1]=g;o[i*4+2]=g;}o[i*4+3]=255;}
+  cx.putImageData(im,0,0);fit();
+}
+function fit(){const cv=$('view'),st=$('stage').getBoundingClientRect(),k=Math.min(st.width/cv.width,st.height/cv.height);
+  cv.style.width=Math.floor(cv.width*k)+'px';cv.style.height=Math.floor(cv.height*k)+'px';
+  $('hSize').textContent=PHOTO?`${cv.width}×${cv.height}`:'—';}
+window.addEventListener('resize',()=>setTimeout(fit,50));
+function syncView(){[['vPhoto','photo'],['vDepth','depth'],['vMix','mix']].forEach(([id,v])=>$(id).classList.toggle('on',S.view===v));
+  $('bInv').classList.toggle('on',S.inv);$('bInv').textContent=S.inv?'INVERTED (far = high)':'INVERT';}
+[['vPhoto','photo'],['vDepth','depth'],['vMix','mix']].forEach(([id,v])=>$(id).onclick=()=>{S.view=v;save();syncView();draw();});
+$('bInv').onclick=()=>{S.inv=!S.inv;save();syncView();draw();};
+
+// ── handoff: depth as 16-bit, colours as 8-bit RGB, both base64 → small enough for local storage
+function b64(bytes){let s='';for(let i=0;i<bytes.length;i+=0x8000)s+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));return btoa(s);}
+function handoffText(){
+  const n=DEP.w*DEP.h,u=new Uint16Array(n);
+  for(let i=0;i<n;i++){const v=S.inv?1-DEP.d[i]:DEP.d[i];u[i]=Math.round(clamp(v,0,1)*65535);}
+  return JSON.stringify({format:'terra_ai_depth',version:1,name:NAME,w:DEP.w,h:DEP.h,
+    model:'depth-anything-v2-small q8',inverted:S.inv,created:new Date().toISOString(),
+    depth16:b64(new Uint8Array(u.buffer)),rgb8:b64(DEP.rgb)});
+}
+$('bSend').onclick=()=>{
+  if(!DEP){setStatus('RUN AI DEPTH FIRST',true);return;}
+  const t=handoffText();
+  try{localStorage.setItem(HKEY,t);$('hoInfo').textContent=`sent · ${(t.length/1024).toFixed(0)} KB`;
+    setStatus('SENT · TERRA_FORGE → AI HANDOFF · BODY FORGE → PULL AI HANDOFF');}
+  catch(e){setStatus('STORAGE FULL OR BLOCKED — USE COPY HANDOFF JSON',true);}
+};
+$('bCopyHO').onclick=()=>{if(!DEP){setStatus('RUN AI DEPTH FIRST',true);return;}
+  showText(handoffText(),`${NAME}_ai_depth.json`,'HANDOFF JSON · paste into TERRA_FORGE (SOURCE box → READ BOX) or load as a file');};
+
+// ── straight to the game: ODM composer JSON, byte-for-byte the layout DEPTH_FORGE writes
+$('bGame').onclick=()=>{
+  if(!DEP){setStatus('RUN AI DEPTH FIRST',true);return;}
+  const d=S.grid,{w,h}=DEP,pts=[];
+  const at=(a,u,v)=>{const x=u*(w-1),y=v*(h-1),x0=x|0,y0=y|0,x1=Math.min(x0+1,w-1),y1=Math.min(y0+1,h-1),fx=x-x0,fy=y-y0;
+    return(a[y0*w+x0]*(1-fx)+a[y0*w+x1]*fx)*(1-fy)+(a[y1*w+x0]*(1-fx)+a[y1*w+x1]*fx)*fy;};
+  for(let y=0;y<d;y++)for(let x=0;x<d;x++){
+    const u=x/(d-1),v=y/(d-1),px=Math.min(Math.floor(u*w),w-1),py=Math.min(Math.floor(v*h),h-1),p=py*w+px;
+    let e=at(DEP.d,u,v);if(S.inv)e=1-e;
+    pts.push({gridIndex:{x,y},pixelCoordinate:{x:px,y:py},elevationNormalized:+(e*S.z).toFixed(6),elevationRaw:+e.toFixed(6),
+      colorRGB:[DEP.rgb[p*3]/255,DEP.rgb[p*3+1]/255,DEP.rgb[p*3+2]/255].map(c=>+c.toFixed(4))});
+  }
+  const out={exportMeta:{timestamp:new Date().toISOString(),systemDensity:d,totalPointCount:pts.length,
+    layoutConfiguration:'DEPTH_AI · depth-anything-v2-small · '+w+'×'+h,physicalGridSize:200,appliedHeightScale:S.z},vertexDataMatrix:pts};
+  showText(JSON.stringify(out),`terrain_${NAME}.json`,`GAME TERRAIN JSON · ${d}×${d} · ODM composer format`);
+};
+const bindR=(id,k,fmt)=>{const el=$(id),b=$(id+'V');el.value=S[k];b.textContent=fmt(S[k]);
+  el.oninput=()=>{S[k]=+el.value;b.textContent=fmt(S[k]);save();};};
+bindR('sSize','size',v=>v+'px');bindR('sZ','z',v=>v.toFixed(2));bindR('sGrid','grid',v=>v+'×'+v);
+
+// ── text export (Koder can't download: copy / share / select in the box)
+let TEXT=null;
+function showText(text,name,note){TEXT={text,name};$('textNote').textContent=note;
+  $('textBox').value=text.length>200000?text.slice(0,200000)+`\n… (${(text.length/1e6).toFixed(1)} MB total — COPY ALL / SHARE copies everything)`:text;$('textOut').classList.add('on');}
+$('textClose').onclick=()=>{$('textOut').classList.remove('on');$('textBox').value='';};
+$('textCopy').onclick=async()=>{try{await navigator.clipboard.writeText(TEXT.text);setStatus('COPIED '+TEXT.name);}
+  catch(_){$('textBox').focus();$('textBox').select();setStatus('CLIPBOARD BLOCKED — SELECT ALL IN THE BOX',true);}};
+$('textShare').onclick=async()=>{const blob=new Blob([TEXT.text],{type:'application/json'});
+  try{const f=new File([blob],TEXT.name,{type:'application/json'});if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:TEXT.name});return;}}catch(_){}
+  setStatus('SHARING NOT AVAILABLE — USE COPY ALL',true);};
+
+$('bFold').onclick=()=>{const s=$('deck').classList.toggle('shut');$('bFold').textContent=s?'OPEN ▴':'FOLD ▾';setTimeout(fit,240);};
+document.addEventListener('gesturestart',e=>e.preventDefault());
+syncView();
+window.__DA={get TEXT(){return TEXT},get DEP(){return DEP},set DEP(v){DEP=v},get PHOTO(){return PHOTO},loadPhoto,modelInput,runAI,handoffText,S};
+})();
+</script>
+</body>
+</html>
