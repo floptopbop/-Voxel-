@@ -91,7 +91,7 @@ addEventListener('DOMContentLoaded',()=>{
   [GENES]  emu abilities are genes 0..1 that blend when they breed: skim (half-skimmers need more speed and
            sink sooner), leap (spring + glide), spit (fills at water, sprays what startles it), thump (hard
            landings send a shockwave), glow (a lantern after dark, drawn to rites). ~2% of chicks get a new one.
-  [FIRST PERSON] your arms in their own pass (red coat, ODM grips, blades): the right hand fires and holds
+  [FIRST PERSON] your arms drawn last, on top (red coat, ODM grips, blades): the right hand fires and holds
            the rope, both react to running, falling, boost, wall runs, swimming, riding, landing, tumbles,
            slashes and high fives. Look down for your legs and coat; a shadow under you shows where you'll
            land. Bob and sway come only from your motion. Deck tab 'first person'.
@@ -320,13 +320,13 @@ body.replaying #gl-strip, body.replaying #p2-hint, body.replaying #map-tab, body
     transform:translateY(100%); transition:transform 0.25s ease; padding-bottom:env(safe-area-inset-bottom,0); }
 #ui-deck.open { transform:translateY(0); }
 /* tiny pull-tab: the only thing visible when the deck is closed */
-#deck-pull { position:fixed; left:5%; bottom:0; z-index:61; width:20px; height:20px;
+#deck-pull { position:fixed; left:5%; bottom:0; z-index:61; width:22px; height:32px;
     background:var(--deck); border:1px solid var(--accent); border-bottom:none; border-radius:6px 6px 0 0;
     display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 -4px 12px rgba(0,0,0,0.4);
     transition:opacity 0.2s ease, transform 0.2s ease; }
-#deck-pull span { color:var(--accent); font-size:8px; line-height:1; letter-spacing:0; }
+#deck-pull span { color:var(--accent); font-size:8px; line-height:1; letter-spacing:1px; }
 #ui-deck.open + #deck-pull { opacity:0; transform:translateY(100%); pointer-events:none; }
-#deck-tab { height:44px; min-height:34px; display:flex; align-items:center; padding:0 12px; font-size:0.5rem; letter-spacing:3px; cursor:pointer; }
+#deck-tab { height:14px; min-height:14px; display:flex; align-items:center; padding:0 12px; font-size:0.05rem; letter-spacing:3px; cursor:pointer; }
 #deck-reset { margin-left:auto; background:transparent; border:1px solid rgba(174,182,190,0.22); color:var(--muted); font-family:inherit; font-size:0.45rem; letter-spacing:1px; padding:1px 7px; border-radius:3px; }
 #deck-reset.armed { border-color:#B5654A; color:#D9A58F; }
 #deck-mode { margin-left:6px; background:transparent; border:1px solid rgba(174,182,190,0.22); color:var(--muted); font-family:inherit; font-size:0.45rem; letter-spacing:1px; padding:1px 7px; border-radius:3px; }
@@ -374,7 +374,7 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:12px;
 .fthumb.sel { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold); }
 #forge-sliders .col { border-bottom:1px solid rgba(174,182,190,0.07); }
 #forge-stats { font-size:9px; color:var(--muted); letter-spacing:0.3px; line-height:1.6; border-left:2px solid var(--seal); padding-left:7px; }
-#toast-container { position: uhhhh fixed; top:98px; right:10px; z-index:9999; display:flex; flex-direction:column; align-items:flex-end; gap:5px; pointer-events:none; }
+#toast-container { position:fixed; top:98px; right:10px; z-index:9999; display:flex; flex-direction:column; align-items:flex-end; gap:5px; pointer-events:none; }
 .toast { background:var(--chip); border-left:2px solid var(--seal); color:var(--ink); padding:3px 8px; font-size:9px; letter-spacing:0.3px; border-radius:0 3px 3px 0; animation:tIn 0.4s ease-out, tOut 1s ease-in 1.8s forwards; }
 @keyframes tIn { from{opacity:0;transform:translateY(-6px);} to{opacity:1;transform:translateY(0);} }
 @keyframes tOut { from{opacity:1;} to{opacity:0;} }
@@ -1136,7 +1136,7 @@ const SND = { on:1, vol:0.75, amb:0.55, life:0.85 };
 // [LIFE CYCLE] lifespans in game days (one day = DAY.mins real minutes); watchers and colossals live a multiple of it · mut: % of chicks born with a new ability
 const LXC = { on:1, days:8, watch:3.5, col:6, emu:1, roam:1, lurk:1, colo:1, mut:2 };
 // [FIRST PERSON] your arms (own pass, never clip), body when you look down, shadow under you · lag: arms trail your turning · bob/sway: from your own motion only
-const FPC = { arms:1, body:1, shadow:1, blades:1, size:1, lag:1, swing:1, bob:0.4, sway:0.4 };
+const FPC = { arms:1, body:1, shadow:1, blades:1, size:0.45, lag:1, swing:1, bob:0.4, sway:0.4 };
 
 const ATMO = { skyH:205, skyS:0.14, skyL:0.78, fogNear:1500, fogFar:14000, sunInt:1.0, ambInt:1.1, sunEl:54, sunAz:56, groundBright:1 };
 
@@ -4091,7 +4091,7 @@ const GROUPS = [
  ]],
  ['first person', false, [
     mk('your arms',0,1,1,FPC,'arms'), mk('your body (look down)',0,1,1,FPC,'body'), mk('your shadow',0,1,1,FPC,'shadow'), mk('blades in hand',0,1,1,FPC,'blades'),
-    mk('arm size',0.6,1.5,0.05,FPC,'size'), mk('arm lag on turns',0,2,0.05,FPC,'lag'), mk('arm swing (1 = replay rhythm)',0,3,0.05,FPC,'swing'), mk('head bob',0,1.5,0.05,FPC,'bob'), mk('sway',0,1.5,0.05,FPC,'sway'),
+    mk('arm size on screen',0.25,1.2,0.05,FPC,'size'), mk('arm lag on turns',0,2,0.05,FPC,'lag'), mk('arm swing (1 = replay rhythm)',0,3,0.05,FPC,'swing'), mk('head bob',0,1.5,0.05,FPC,'bob'), mk('sway',0,1.5,0.05,FPC,'sway'),
  ]],
  ['life cycle', false, [
     mk('creatures age',0,1,1,LXC,'on'), mk('lifespan (game days)',1,40,0.5,LXC,'days'), mk('watchers live ×',1,10,0.5,LXC,'watch'), mk('colossals live ×',1,15,0.5,LXC,'col'),
@@ -13505,32 +13505,34 @@ SFX.ascend = (p, H) => sndFx('ascend', 2, SNDX.sfx, p, 6000 + H*4, 0.7, 5, o => 
 
 // ╔══════════════════════════════════════════════════════════╗
 // ║ [FIRST PERSON] your arms, your body, your shadow          ║
-// ║ Arms (red coat, dark gloves, ODM grips) drawn in their own ║
-// ║ pass so they never clip into the world: the right hand     ║
+// ║ Arms (red coat, dark gloves, ODM grips) drawn last, on top ║
+// ║ so they never clip into the world: the right hand          ║
 // ║ fires the rope and holds it, both react to what you do     ║
 // ║ (run, fall, boost, wall run, swim, ride, land, tumble,     ║
 // ║ slash, high five). Look down: legs and coat. A shadow      ║
 // ║ under you shows where you'll land. Bob and sway follow     ║
 // ║ your motion only. Colours match your replay body.          ║
 // ╚══════════════════════════════════════════════════════════╝
-const FP = { scene:new THREE.Scene(), cam:new THREE.PerspectiveCamera(70, 1, 0.05, 200), rig:new THREE.Group(), amb:null, sun:null,
+const FP = { rig:new THREE.Group(), shadowOK:false,
     arms:[], H:[new THREE.Vector3(-1.05, -0.8, -3.0), new THREE.Vector3(1.05, -0.8, -3.0)], lag:new THREE.Vector3(), lagV:new THREE.Vector3(),
     pyaw:0, ppitch:0, ph:0, imp:0, airVy:0, wasG:true, punch:0, five:0, ropeOn:false, ropeL:0, pull:0, t:0,
     body:null, legs:[], torso:null, shadow:null, bob:0, swayR:0, saved:new THREE.Vector3(), savedQ:new THREE.Quaternion(), pushed:false };
 const FP_COL = { coat:0x8F2B33, coatD:0x6E2128, glove:0x2A2420, gear:0x7D7D85, blade:0x8E9296, scarf:0xD19A3E, pants:0x2A2420, boot:0x1E1915 };
 const _fpA = new THREE.Vector3(), _fpB = new THREE.Vector3(), _fpC = new THREE.Vector3(), _fpD = new THREE.Vector3(), _fpY = new THREE.Vector3(0, 1, 0), _fpQ = new THREE.Quaternion();
 function fpMat(c){ return new THREE.MeshLambertMaterial({ color:c }); }
+function fpArmMat(c){ return new THREE.MeshLambertMaterial({ color:c, depthTest:false, depthWrite:false, fog:false, transparent:true, opacity:1 }); }   // drawn last (after water and glows too), on top: never clips into a wall
 function fpBuild(){
-    FP.amb = new THREE.AmbientLight(0xffffff, 1); FP.sun = new THREE.DirectionalLight(0xffffff, 1);
-    FP.scene.add(FP.amb); FP.scene.add(FP.sun); FP.scene.add(FP.sun.target); FP.scene.add(FP.cam); FP.cam.add(FP.rig);
+    scene.add(FP.rig); FP.rig.visible = false;
     const ub = new THREE.BoxGeometry(1, 1, 1);
     for(const s of [-1, 1]){
-        const A = { s, upper:new THREE.Mesh(ub, fpMat(FP_COL.coat)), cuff:new THREE.Mesh(ub, fpMat(FP_COL.scarf)), fore:new THREE.Mesh(ub, fpMat(FP_COL.coatD)), hand:new THREE.Group(), blade:null };
-        const glove = new THREE.Mesh(ub, fpMat(FP_COL.glove)); glove.scale.set(0.46, 0.38, 0.6); A.hand.add(glove);
-        const grip = new THREE.Mesh(ub, fpMat(FP_COL.gear)); grip.scale.set(0.16, 0.5, 0.18); grip.position.set(0, -0.05, -0.12); grip.rotation.x = -0.5; A.hand.add(grip);
+        const A = { s, upper:new THREE.Mesh(ub, fpArmMat(FP_COL.coat)), cuff:new THREE.Mesh(ub, fpArmMat(FP_COL.scarf)), fore:new THREE.Mesh(ub, fpArmMat(FP_COL.coatD)), hand:new THREE.Group(), blade:null };
+        const glove = new THREE.Mesh(ub, fpArmMat(FP_COL.glove)); glove.scale.set(0.46, 0.38, 0.6); A.hand.add(glove);
+        const grip = new THREE.Mesh(ub, fpArmMat(FP_COL.gear)); grip.scale.set(0.16, 0.5, 0.18); grip.position.set(0, -0.05, -0.12); grip.rotation.x = -0.5; A.hand.add(grip);
         const bp = new THREE.Group(); bp.position.set(0, 0.05, -0.3); bp.rotation.order = 'YXZ'; bp.rotation.set(-0.5, -s*0.3, 0); A.hand.add(bp);      // the blade angles down and out from the grip
-        A.blade = new THREE.Mesh(ub, fpMat(FP_COL.blade)); A.blade.scale.set(0.035, 0.12, 1.2); A.blade.position.set(0, 0, -0.65); bp.add(A.blade);
+        A.blade = new THREE.Mesh(ub, fpArmMat(FP_COL.blade)); A.blade.scale.set(0.035, 0.12, 1.2); A.blade.position.set(0, 0, -0.65); bp.add(A.blade);
         FP.rig.add(A.upper, A.fore, A.hand); FP.arms.push(A);
+        A.upper.renderOrder = 990; A.fore.renderOrder = 991; A.hand.traverse(o => { if(o.isMesh){ o.renderOrder = 993; o.frustumCulled = false; } }); A.blade.renderOrder = 992;
+        A.upper.frustumCulled = A.fore.frustumCulled = false;
     }
     // the body you see looking down: coat, belt and gear, legs and boots (in the world, so it sits on the ground and casts no oddities)
     const B = FP.body = new THREE.Group(); scene.add(B);
@@ -13587,8 +13589,7 @@ function fpStep(dt){
     fpBody(dt, hs, gnd, sp);
 }
 function fpArms(dt){
-    const v = player.vel, hs = Math.hypot(v.x, v.z), gnd = !!player.gnd, sp = Math.min(1, hs/130), t = FP.t, ph = FP.ph, sz = FPC.size;
-    FP.rig.scale.setScalar(sz);
+    const v = player.vel, hs = Math.hypot(v.x, v.z), gnd = !!player.gnd, sp = Math.min(1, hs/130), t = FP.t, ph = FP.ph, D = 1/Math.max(0.2, FPC.size);   // smaller = same place on screen, further off
     const air = !gnd && !grapple.active && !wall.on && player.tumble <= 0 && !PR.e && (SW.sub || 0) < 0.5;
     const fall = air ? clamp(-v.y/160, 0, 1) : 0;
     for(const A of FP.arms){
@@ -13609,15 +13610,15 @@ function fpArms(dt){
         if(player.boostIntensity > 0.05 && !grapple.active){ T.lerp(_fpD.set(s*1.35, -1.45, -1.9), Math.min(1, player.boostIntensity*1.5)); }
         if(grapple.active){
             if(s > 0){                                                       // your right hand holds the rope out to where it bit
-                FP.cam.updateMatrixWorld(true); _fpD.copy(grapple.anchor); FP.cam.worldToLocal(_fpD); _fpD.divideScalar(sz);
+                _fpD.copy(grapple.anchor); FP.rig.worldToLocal(_fpD); _fpD.divideScalar(D);
                 _fpN.subVectors(_fpD, S).normalize();
                 T.copy(S).addScaledVector(_fpN, 3.4 + 0.35*FP.punch - 0.7*FP.pull + 0.06*Math.sin(t*30)*FP.pull); kk = FP.punch > 0 ? 40 : 22;
             } else { T.set(-1.05, -0.8, -3.0); _fpD.subVectors(T, S); const c = Math.cos(-0.34*FPC.swing), sn = Math.sin(-0.34*FPC.swing), y = _fpD.y, z = _fpD.z; _fpD.y = y*c - z*sn; _fpD.z = y*sn + z*c; T.copy(S).add(_fpD); T.x -= 0.5; }   // the other hand trails, as in the replay
         }
         if(wall.on){                                                         // the hand on the wall's side brushes along it
-            _fpN.set(wall.nx, 0, wall.nz); _fpN.applyQuaternion(_fpQ.copy(FP.cam.quaternion).invert());
+            _fpN.set(wall.nx, 0, wall.nz); _fpN.applyQuaternion(_fpQ.copy(FP.rig.quaternion).invert());
             const wside = _fpN.x > 0 ? -1 : 1;
-            if(s === wside){ T.copy(S).addScaledVector(_fpN, -3.1).add(_fpD.set(0, 0.2, -0.9)); if(Math.random() < dt*14){ FP.cam.updateMatrixWorld(true); _fpD.copy(T).multiplyScalar(sz); FP.cam.localToWorld(_fpD); emit(_c1.copy(_fpD), _c2.set((Math.random() - 0.5)*20, 6 + Math.random()*10, (Math.random() - 0.5)*20), 0.35, false, 0.08); } }
+            if(s === wside){ T.copy(S).addScaledVector(_fpN, -3.1).add(_fpD.set(0, 0.2, -0.9)); if(Math.random() < dt*14){ _fpD.copy(T).multiplyScalar(D); FP.rig.localToWorld(_fpD); emit(_c1.copy(_fpD), _c2.set((Math.random() - 0.5)*20, 6 + Math.random()*10, (Math.random() - 0.5)*20), 0.35, false, 0.08); } }
             else T.set(s*1.5, -1.1 + 0.15*Math.sin(ph), -2.5 + 0.4*Math.sin(ph)*s);
         }
         if((SW.sub || 0) > 0.55 && !PR.e){ const c = Math.sin(t*3.2), d = Math.cos(t*3.2); T.set(s*(0.6 + 0.9*Math.max(0, d)), -0.8 + 0.25*c, -2.4 - 0.6*Math.max(0, c)); }
@@ -13633,8 +13634,8 @@ function fpArms(dt){
         const H = FP.H[i]; H.lerp(T, 1 - Math.exp(-kk*dt));
         _fpPole.set(s*1.4, -1.2, 0.3).normalize();
         const Hc = _fpD.copy(H); fpIK(S, Hc, 1.95, 1.85, _fpPole, _fpE);
-        fpLimb(A.upper, S, _fpE, 0.62); fpLimb(A.fore, _fpE, Hc, 0.5);
-        _fpC.subVectors(Hc, _fpE).normalize(); A.cuff.position.copy(Hc).addScaledVector(_fpC, -0.42); A.cuff.quaternion.copy(A.fore.quaternion); A.cuff.scale.set(0.54, 0.14, 0.54);
+        _fpE.multiplyScalar(D); Hc.multiplyScalar(D); const S2 = _fpT.copy(S).multiplyScalar(D);
+        fpLimb(A.upper, S2, _fpE, 0.62); fpLimb(A.fore, _fpE, Hc, 0.5);
         A.hand.position.copy(Hc);                                            // the hand points along the forearm, the grip and blade ahead of it
         _fpM.lookAt(_fpE, Hc, _fpY); A.hand.quaternion.setFromRotationMatrix(_fpM);
         A.blade.visible = !!FPC.blades;
@@ -13643,7 +13644,6 @@ function fpArms(dt){
 }
 function fpBody(dt, hs, gnd, sp){
     const B = FP.body, on = FPC.body && fpOn();
-    B.visible = on;
     if(on){
         B.position.set(player.pos.x, player.pos.y - M.height, player.pos.z); B.rotation.y = player.yaw;
         const ph = FP.ph, t = FP.t, air = !gnd && !wall.on && !PR.e;
@@ -13663,7 +13663,7 @@ function fpBody(dt, hs, gnd, sp){
     }
     // the shadow: on whatever's under you, smaller and fainter the higher you are
     const Sh = FP.shadow, ok = FPC.shadow && APP === 'play' && !REC.on;
-    Sh.visible = ok; if(!ok) return;
+    FP.shadowOK = false; if(!ok) return;
     const x = player.pos.x, z = player.pos.z, feet = player.pos.y - M.height;
     let gy = floorY(x, z);
     for(const st of statics){ if(st.topY > feet + 2 || st.topY < gy || Math.abs(st.x - x) > st.hw || Math.abs(st.z - z) > st.hd) continue; gy = st.topY; }
@@ -13671,7 +13671,7 @@ function fpBody(dt, hs, gnd, sp){
     const h = Math.max(0, feet - gy), f = clamp(1 - h/1800, 0, 1);
     Sh.position.set(x, gy + 0.4, z); Sh.scale.setScalar(M.radius*1.5*(1 + Math.min(1.5, h/400)));
     Sh.material.opacity = 0.32*f*(gnd ? 0.8 : 1);
-    Sh.visible = f > 0.02;
+    FP.shadowOK = f > 0.02;
 }
 // render-time only: a little bob and sway from your own motion, then the arms in their own pass on top
 function fpCamPush(){
@@ -13685,23 +13685,16 @@ function fpCamPush(){
 }
 function fpCamPop(){ if(FP.pushed){ camera.position.copy(FP.saved); camera.quaternion.copy(FP.savedQ); FP.pushed = false; } }
 function fpRender(dt){
-    if(!fpOn() || !FPC.arms) return;
-    const c = FP.cam;
-    if(c.fov !== camera.fov || c.aspect !== camera.aspect){ c.fov = camera.fov; c.aspect = camera.aspect; c.updateProjectionMatrix(); }
-    c.position.copy(camera.position); c.quaternion.copy(camera.quaternion); c.updateMatrixWorld(true);
+    const on = fpOn();
+    FP.body.visible = on && !!FPC.body; FP.shadow.visible = FP.shadowOK && on;
+    FP.rig.visible = on && !!FPC.arms;
+    if(!FP.rig.visible) return;
+    FP.rig.position.copy(camera.position); FP.rig.quaternion.copy(camera.quaternion); FP.rig.updateMatrixWorld(true);
     fpArms(dt); FP.rig.updateMatrixWorld(true);
-    // your light: the sky's light, falling the same way
-    FP.amb.color.copy(amb.color); FP.amb.intensity = amb.intensity;
-    FP.sun.color.copy(sun.color); FP.sun.intensity = sun.intensity;
-    _fpD.subVectors(sun.position, sun.target.position).normalize(); FP.sun.position.copy(c.position).addScaledVector(_fpD, 50); FP.sun.target.position.copy(c.position); FP.sun.target.updateMatrixWorld();
     // the rope leaves your hand
     if(grapple.line){ const A = FP.arms[1]; _fpD.set(0, 0.1, -0.5); A.hand.localToWorld(_fpD); const a = grapple.line.geometry.attributes.position.array; a[0] = _fpD.x; a[1] = _fpD.y; a[2] = _fpD.z; grapple.line.geometry.attributes.position.needsUpdate = true; }
 }
-function fpPass(){
-    if(!fpOn() || !FPC.arms) return;
-    const ac = renderer.autoClear; renderer.autoClear = false; renderer.clearDepth();
-    const f = scene.fog; renderer.render(FP.scene, FP.cam); renderer.autoClear = ac;
-}
+function fpPass(){ FP.rig.visible = false; FP.body.visible = false; FP.shadow.visible = false; }   // after the frame: out of every other view (replays, the forge)
 { const o = monkeyHighFive; monkeyHighFive = function(){ FP.five = 0.55; return o.apply(this, arguments); }; }
 
 const _restored = restoreSettings();
@@ -13762,7 +13755,7 @@ function animate(){
     drawSlash(); holdDraw();
     recordFrame(dt);
     fpCamPush(); jCamApply(); fpRender(dt);                          // [FIRST PERSON] bob/sway (render-only), arms posed, rope from your hand
-    renderer.render(scene, camera); fpPass(); jCamRestore(); fpCamPop();    // the arms go on top in their own pass
+    renderer.render(scene, camera); fpPass(); jCamRestore(); fpCamPop();    // one pass: the arms are drawn last, on top
 }
 // ── [VR] simplest test: no controls, you stand where you were and look around; the world keeps playing ──
 // The camera sits in a rig. Out of VR the rig does nothing; in VR it holds your spot, your facing, and
