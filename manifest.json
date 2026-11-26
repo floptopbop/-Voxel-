@@ -1,14 +1,36 @@
 {
-  "name": "ODM World",
-  "short_name": "ODM World",
-  "description": "An emergent creature world plus the tools that build its bodies and terrain.",
+  "name": "IMG_7163",
+  "short_name": "IMG_7163",
   "start_url": "./",
   "scope": "./",
-  "display": "fullscreen",
-  "orientation": "any",
-  "background_color": "#0b0c0f",
-  "theme_color": "#15171b",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#302b2d",
+  "theme_color": "#302b2d",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
   ]
 }
